@@ -1,0 +1,39 @@
+# Environment variables
+.env
+
+# Virtual environment
+tgbot/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Logs
+*.log
+bot.log
+
+# User data
+user_ids.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Distribution
+dist/
+build/
+*.egg-info/
+
+# Old Stuff
+gateway_checker_old.py
