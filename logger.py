@@ -6,6 +6,11 @@ from config import Config
 def setup_logger():
     """Configure and return a logger instance."""
     logger = logging.getLogger('TelegramGatewayBot')
+    
+    # Prevent duplicate handlers
+    if logger.handlers:
+        return logger
+    
     logger.setLevel(logging.INFO)
     
     # Console handler

@@ -97,7 +97,7 @@ def cmd_help(message):
         "✅ 3D Secure / OTP detection\n"
         "✅ CVV/CVC requirement analysis\n"
         "✅ Inbuilt payment system detection\n\n"
-        "Bot by: @volde_is_back"
+        "Bot by: @volde\\_is\\_back"
     )
     
     bot.send_message(message.chat.id, help_message, parse_mode='Markdown')
@@ -245,7 +245,7 @@ def handle_text(message):
             "🔍 **Gateways Fetched Successfully** ✅\n"
             "━━━━━━━━━━━━━━\n" +
             "".join(results) +
-            "\n👤 Bot by: @volde_is_back\n"
+            "\n👤 Bot by: @volde\\_is\\_back\n"
             "🤖 Bot Username: @voldeGatewayhunterBot"
         )
         
