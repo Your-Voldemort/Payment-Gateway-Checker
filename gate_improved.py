@@ -245,7 +245,7 @@ def handle_text(message):
             "🔍 **Gateways Fetched Successfully** ✅\n"
             "━━━━━━━━━━━━━━\n" +
             "".join(results) +
-            "\n👤 Bot by: @volde\\_is\\_back\n"
+            "\n👤 Bot by: @volde_is_back\n"
             "🤖 Bot Username: @voldeGatewayhunterBot"
         )
         
