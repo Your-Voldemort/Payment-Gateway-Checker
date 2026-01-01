@@ -6,7 +6,7 @@ from logger import setup_logger
 from gateway_checker import check_url
 from user_manager import load_user_ids, save_user_id, get_user_count
 from rate_limiter import RateLimiter
-from utils import format_url_result
+from utils import format_url_result, normalize_url
 
 # Initialize logger
 logger = setup_logger()
@@ -197,12 +197,15 @@ def handle_text(message):
         )
         return
     
-    # Process URLs
-    urls = [url.strip() for url in message.text.strip().splitlines() if url.strip()]
+    # Process URLs - normalize and validate
+    raw_urls = [url.strip() for url in message.text.strip().splitlines() if url.strip()]
     
-    if not urls:
+    if not raw_urls:
         bot.send_message(message.chat.id, "❌ No URLs provided. Please send valid URLs.")
         return
+    
+    # Normalize URLs (add https:// if missing)
+    urls = [normalize_url(url) for url in raw_urls]
     
     if len(urls) > Config.MAX_URLS_PER_REQUEST:
         bot.send_message(

@@ -7,6 +7,33 @@ from config import (
     SECURE_3D_KEYWORDS, OTP_KEYWORDS, INBUILT_PAYMENT_KEYWORDS
 )
 
+
+def normalize_url(url: str) -> str:
+    """
+    Normalize URL by adding https:// protocol if missing.
+    
+    Handles various URL formats:
+    - xyz.com -> https://xyz.com
+    - www.xyz.com -> https://www.xyz.com
+    - https://xyz.com -> https://xyz.com (no change)
+    - http://xyz.com -> http://xyz.com (no change)
+    
+    Args:
+        url: URL string to normalize
+        
+    Returns:
+        str: Normalized URL with protocol
+    """
+    url = url.strip()
+    
+    # If URL already has a protocol, return as is
+    if url.startswith(('http://', 'https://')):
+        return url
+    
+    # Add https:// protocol
+    return f'https://{url}'
+
+
 def is_valid_url(url: str) -> bool:
     """
     Validate URL using the validators library.
