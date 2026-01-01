@@ -1,4 +1,5 @@
 
+import time
 import telebot
 from config import Config
 from logger import setup_logger
@@ -298,18 +299,69 @@ def handle_media(message):
 
 
 def main():
-    """Main function to start the bot."""
+    """Main function to start the bot with automatic reconnection."""
     logger.info("Starting bot polling...")
     logger.info(f"Bot username: @voldeGatewayhunterBot")
     logger.info(f"Owner ID: {Config.OWNER_USER_ID}")
     
-    try:
-        bot.polling(none_stop=True, interval=1, timeout=30)
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-    except Exception as e:
-        logger.error(f"Bot crashed: {str(e)}")
-        raise
+    retry_count = 0
+    max_retries = 5
+    base_delay = 5  # Base delay in seconds
+    max_delay = 60  # Maximum delay between retries
+    
+    while True:
+        try:
+            logger.info("Bot is now polling for updates...")
+            bot.polling(none_stop=True, interval=1, timeout=30)
+            
+        except KeyboardInterrupt:
+            logger.info("Bot stopped by user")
+            break
+            
+        except telebot.apihelper.ApiException as e:
+            # Handle Telegram API specific errors
+            logger.error(f"Telegram API error: {str(e)}")
+            retry_count += 1
+            
+            if retry_count >= max_retries:
+                logger.critical(f"Max retries ({max_retries}) reached. Stopping bot.")
+                break
+            
+            # Calculate exponential backoff delay
+            delay = min(base_delay * (2 ** (retry_count - 1)), max_delay)
+            logger.info(f"Retrying in {delay} seconds... (Attempt {retry_count}/{max_retries})")
+            
+            time.sleep(delay)
+            
+        except Exception as e:
+            # Handle all other exceptions (including ReadTimeout)
+            error_msg = str(e)
+            logger.error(f"Error occurred: {error_msg}")
+            
+            # Check if it's a timeout error
+            if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
+                logger.warning("Network timeout detected. Attempting to reconnect...")
+                retry_count += 1
+                
+                if retry_count >= max_retries:
+                    logger.critical(f"Max retries ({max_retries}) reached after timeout errors. Stopping bot.")
+                    break
+                
+                # Calculate exponential backoff delay
+                delay = min(base_delay * (2 ** (retry_count - 1)), max_delay)
+                logger.info(f"Reconnecting in {delay} seconds... (Attempt {retry_count}/{max_retries})")
+                
+                time.sleep(delay)
+            else:
+                # For non-timeout errors, log and re-raise
+                logger.critical(f"Unexpected error: {error_msg}")
+                logger.exception("Full traceback:")
+                break
+        else:
+            # Reset retry count on successful connection
+            if retry_count > 0:
+                logger.info("Successfully reconnected. Resetting retry counter.")
+                retry_count = 0
 
 
 if __name__ == "__main__":

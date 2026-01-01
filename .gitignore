@@ -39,3 +39,5 @@ build/
 gateway_checker_old.py
 user_ids.txt
 bot.log
+user_ids.txt.backup
+user_ids.json
