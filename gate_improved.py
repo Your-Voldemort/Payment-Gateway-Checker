@@ -67,10 +67,12 @@ def cmd_start(message):
     logger.info(f"User {user_id} ({first_name}) started the bot")
     
     welcome_message = (
-        f"👋 Hey {first_name}! Welcome to Gateway Hunter Bot!\n\n"
-        "🔍 I can help you detect payment gateways and security features on websites.\n\n"
-        "📝 Use /register to get started\n"
-        "❓ Use /help for more information"
+        f"👋 **Hey {first_name}!** Welcome to *Gateway Hunter Bot*\n\n"
+        "I help you analyze websites for payment gateways and security features.\n\n"
+        "**🚀 Get Started**\n"
+        "• Use /register to begin\n"
+        "• Use /help for detailed info\n\n"
+        "_Let's discover what's behind those payment pages!_ 🔍"
     )
     
     bot.send_message(message.chat.id, welcome_message)
@@ -80,25 +82,29 @@ def cmd_start(message):
 def cmd_help(message):
     """Handle /help command."""
     help_message = (
-        "📖 **Gateway Hunter Bot Help**\n\n"
-        "**Available Commands:**\n"
-        "/start - Start the bot\n"
-        "/register - Register to use the bot\n"
-        "/help - Show this help message\n"
-        "/stats - Show bot statistics (Owner only)\n"
-        "/broadcast - Broadcast message (Owner only)\n\n"
-        "**How to use:**\n"
-        "1. Use /register to register\n"
-        "2. Send one or more URLs (each on a new line)\n"
-        "3. Receive detailed analysis of payment gateways and security\n\n"
-        "**Features:**\n"
-        "✅ Payment gateway detection\n"
-        "✅ Captcha detection\n"
-        "✅ Cloudflare detection\n"
-        "✅ 3D Secure / OTP detection\n"
-        "✅ CVV/CVC requirement analysis\n"
-        "✅ Inbuilt payment system detection\n\n"
-        "Bot by: @volde\\_is\\_back"
+        "📚 **Gateway Hunter Bot** • _Help Guide_\n\n"
+        
+        "**⚡ Quick Start**\n"
+        "1️⃣ Register with /register\n"
+        "2️⃣ Send any URL (e.g., `example.com`)\n"
+        "3️⃣ Get instant analysis\n\n"
+        
+        "**🛠️ Available Commands**\n"
+        "`/start` - Welcome screen\n"
+        "`/register` - Get access to the bot\n"
+        "`/help` - Show this guide\n"
+        "`/stats` - Bot statistics _(owner only)_\n"
+        "`/broadcast` - Send announcements _(owner only)_\n\n"
+        
+        "**✨ What I Detect**\n"
+        "💳 Payment gateways _(Stripe, PayPal, etc.)_\n"
+        "🤖 Captcha systems\n"
+        "🛡️ Cloudflare protection\n"
+        "🔐 3D Secure / OTP requirements\n"
+        "🔢 CVV/CVC requirements\n"
+        "💼 Inbuilt payment systems\n\n"
+        
+        "_Bot by_ @volde\\_is\\_back"
     )
     
     bot.send_message(message.chat.id, help_message, parse_mode='Markdown')
@@ -114,14 +120,16 @@ def cmd_register(message):
         logger.info(f"User {user_id} registered successfully")
         bot.send_message(
             message.chat.id,
-            "✅ Registration successful!\n\n"
-            "You can now send URLs to check payment gateways.\n"
-            "Send one or multiple URLs (each on a new line)."
+            "✅ **Registration Successful!**\n\n"
+            "You're all set! Send me any URL to analyze.\n\n"
+            "**💡 Tip:** _You can send multiple URLs at once_ (one per line)\n"
+            "Example: `example.com` or `https://example.com`"
         )
     else:
         bot.send_message(
             message.chat.id,
-            "❌ Registration failed. Please try again later."
+            "❌ **Registration Failed**\n\n"
+            "_Something went wrong. Please try again in a moment._"
         )
 
 
@@ -135,10 +143,16 @@ def cmd_stats(message):
     user_count = get_user_count()
     stats_message = (
         f"📊 **Bot Statistics**\n\n"
-        f"👥 Total Users: {user_count}\n"
-        f"🤖 Bot Username: @voldeGatewayhunterBot\n"
-        f"⚙️ Rate Limiting: {'Enabled' if Config.ENABLE_RATE_LIMITING else 'Disabled'}\n"
-        f"📝 Max URLs per request: {Config.MAX_URLS_PER_REQUEST}"
+        
+        f"**👥 User Base**\n"
+        f"Total Users: *{user_count}*\n\n"
+        
+        f"**⚙️ Configuration**\n"
+        f"Bot: @voldeGatewayhunterBot\n"
+        f"Rate Limiting: *{'✅ Enabled' if Config.ENABLE_RATE_LIMITING else '❌ Disabled'}*\n"
+        f"Max URLs/Request: *{Config.MAX_URLS_PER_REQUEST}*\n\n"
+        
+        f"_System running smoothly_ ✨"
     )
     
     bot.send_message(message.chat.id, stats_message, parse_mode='Markdown')
@@ -166,9 +180,10 @@ def handle_broadcast(message):
     stats = broadcast_message(message.text)
     
     result_message = (
-        f"✅ Broadcast complete!\n\n"
-        f"📤 Sent: {stats['sent']}\n"
-        f"❌ Failed: {stats['failed']}"
+        f"✅ **Broadcast Complete!**\n\n"
+        f"📤 Successfully sent: *{stats['sent']}*\n"
+        f"❌ Failed: *{stats['failed']}*\n\n"
+        f"_Message delivered to active users_ 📢"
     )
     
     bot.send_message(message.chat.id, result_message)
@@ -184,7 +199,9 @@ def handle_text(message):
     if user_id not in registered_users:
         bot.send_message(
             message.chat.id,
-            "⚠️ You are not registered. Please use /register first."
+            "⚠️ **Not Registered**\n\n"
+            "Please use /register first to access the bot.\n"
+            "_It only takes a second!_ ✨"
         )
         return
     
@@ -193,7 +210,9 @@ def handle_text(message):
         wait_time = rate_limiter.get_wait_time(user_id)
         bot.send_message(
             message.chat.id,
-            f"⏳ Rate limit exceeded. Please wait {wait_time} seconds before trying again."
+            f"⏳ **Rate Limit Reached**\n\n"
+            f"Please wait *{wait_time} seconds* before trying again.\n\n"
+            f"_This helps keep the bot fast for everyone!_ 🚀"
         )
         return
     
@@ -201,7 +220,12 @@ def handle_text(message):
     raw_urls = [url.strip() for url in message.text.strip().splitlines() if url.strip()]
     
     if not raw_urls:
-        bot.send_message(message.chat.id, "❌ No URLs provided. Please send valid URLs.")
+        bot.send_message(
+            message.chat.id,
+            "❌ **No URLs Found**\n\n"
+            "Please send one or more URLs to analyze.\n"
+            "_Example:_ `example.com` or `https://example.com`"
+        )
         return
     
     # Normalize URLs (add https:// if missing)
@@ -210,14 +234,18 @@ def handle_text(message):
     if len(urls) > Config.MAX_URLS_PER_REQUEST:
         bot.send_message(
             message.chat.id,
-            f"❌ Too many URLs. Maximum {Config.MAX_URLS_PER_REQUEST} URLs per request."
+            f"❌ **Too Many URLs**\n\n"
+            f"Maximum *{Config.MAX_URLS_PER_REQUEST} URLs* per request.\n"
+            f"You sent: *{len(urls)} URLs*\n\n"
+            f"_Please split them into smaller batches_ 📦"
         )
         return
     
     # Send processing message
     processing_msg = bot.send_message(
         message.chat.id,
-        f"🔄 Processing {len(urls)} URL(s)... Please wait."
+        f"🔄 **Analyzing {len(urls)} URL{'s' if len(urls) > 1 else ''}**\n\n"
+        f"_This may take a moment..._ ⏳"
     )
     
     # Process URLs asynchronously
@@ -244,7 +272,11 @@ def handle_text(message):
                 try:
                     if isinstance(response, Exception):
                         logger.error(f"Error processing URL {url}: {str(response)}")
-                        results.append(f"🔹 URL: {url}\n❌ Error: {str(response)}\n━━━━━━━━━━━━━━\n")
+                        results.append(
+                            f"🌐 **URL:** `{url}`\n"
+                            f"❌ **Error:** _{str(response)}_\n"
+                            f"─────────────────\n"
+                        )
                     else:
                         detected_gateways, status_code, captcha, cloudflare, payment_security_type, cvv_cvc_status, inbuilt_status = response
                         result_line = format_url_result(
@@ -254,7 +286,11 @@ def handle_text(message):
                         results.append(result_line)
                 except Exception as e:
                     logger.error(f"Error formatting result for {url}: {str(e)}")
-                    results.append(f"🔹 URL: {url}\n❌ Error: {str(e)}\n━━━━━━━━━━━━━━\n")
+                    results.append(
+                        f"🌐 **URL:** `{url}`\n"
+                        f"❌ **Error:** _{str(e)}_\n"
+                        f"─────────────────\n"
+                    )
         
         return results
     
@@ -266,7 +302,11 @@ def handle_text(message):
         loop.close()
     except Exception as e:
         logger.error(f"Error in async processing: {str(e)}")
-        results = [f"❌ System error: {str(e)}"]
+        results = [
+            f"❌ **System Error**\n\n"
+            f"_{str(e)}_\n"
+            f"_Please try again in a moment._"
+        ]
     
     # Delete processing message
     try:
@@ -276,12 +316,17 @@ def handle_text(message):
     
     # Send results
     if results:
-        response_message = (
-            "🔍 **Gateways Fetched Successfully** ✅\n"
-            "━━━━━━━━━━━━━━\n" +
-            "".join(results) +
-            "\n👤 Bot by: @volde_is_back\n"
-            "🤖 Bot Username: @voldeGatewayhunterBot"
+        # Create header based on number of URLs
+        url_count = len(urls)
+        header = (
+            f"✅ **Analysis Complete!**\n"
+            f"_Checked {url_count} URL{'s' if url_count > 1 else ''}_\n"
+            f"\n"
+        )
+        
+        response_message = header + "".join(results) + (
+            f"\n💬 _Powered by_ @volde\\_is\\_back\n"
+            f"🤖 @voldeGatewayhunterBot"
         )
         
         # Split message if too long (Telegram limit is 4096 characters)
@@ -297,7 +342,9 @@ def handle_media(message):
     """Handle media messages."""
     bot.send_message(
         message.chat.id,
-        "❌ I can only process text URLs. Please send URLs as text messages."
+        "❌ **Text URLs Only**\n\n"
+        "I can only analyze text URLs.\n"
+        "_Please send URLs as text messages._ 📝"
     )
 
 
