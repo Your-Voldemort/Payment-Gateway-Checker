@@ -37,3 +37,5 @@ build/
 
 # Old Stuff
 gateway_checker_old.py
+user_ids.txt
+bot.log

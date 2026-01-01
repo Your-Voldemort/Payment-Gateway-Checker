@@ -1,5 +1,5 @@
 """Payment gateway checking functionality."""
-import requests
+import aiohttp
 from typing import Tuple, List
 from config import Config
 from utils import (
@@ -13,12 +13,13 @@ from logger import setup_logger
 logger = setup_logger()
 
 
-def check_url(url: str) -> Tuple[List[str], int, bool, bool, str, str, str]:
+async def check_url(url: str, session: aiohttp.ClientSession = None) -> Tuple[List[str], int, bool, bool, str, str, str]:
     """
     Check the provided URL for payment gateways, security features, and IP info.
     
     Args:
         url: The URL to check
+        session: Optional aiohttp ClientSession for connection reuse
         
     Returns:
         Tuple containing:
@@ -46,46 +47,55 @@ def check_url(url: str) -> Tuple[List[str], int, bool, bool, str, str, str]:
         'Upgrade-Insecure-Requests': '1'
     }
 
+    # Create session if not provided
+    close_session = False
+    if session is None:
+        session = aiohttp.ClientSession()
+        close_session = True
+
     try:
         logger.info(f"Checking URL: {url}")
-        response = requests.get(
+        
+        timeout = aiohttp.ClientTimeout(total=Config.REQUEST_TIMEOUT)
+        async with session.get(
             url,
             headers=headers,
-            timeout=Config.REQUEST_TIMEOUT,
+            timeout=timeout,
             allow_redirects=True,
-            verify=True
-        )
-        response.raise_for_status()
+            ssl=True
+        ) as response:
+            response.raise_for_status()
+            text = await response.text()
+            
+            # Perform all checks
+            detected_gateways = find_payment_gateways(text)
+            captcha_detected = check_captcha(text)
+            cloudflare_detected = check_cloudflare(response.headers, text)
+            is_3d_secure = check_3d_secure(text)
+            is_otp_required = check_otp_required(text)
+            cvv_cvc_status = check_payment_info(text)
+            inbuilt_payment = check_inbuilt_payment_system(text)
 
-        # Perform all checks
-        detected_gateways = find_payment_gateways(response.text)
-        captcha_detected = check_captcha(response.text)
-        cloudflare_detected = check_cloudflare(response.headers, response.text)
-        is_3d_secure = check_3d_secure(response.text)
-        is_otp_required = check_otp_required(response.text)
-        cvv_cvc_status = check_payment_info(response.text)
-        inbuilt_payment = check_inbuilt_payment_system(response.text)
+            # Determine payment security type
+            payment_security_type = (
+                "Both 3D Secure and OTP Required" if is_3d_secure and is_otp_required else
+                "3D Secure" if is_3d_secure else
+                "OTP Required" if is_otp_required else
+                "2D (No extra security)"
+            )
+            
+            if captcha_detected:
+                payment_security_type += " | Captcha Detected"
+            if cloudflare_detected:
+                payment_security_type += " | Protected by Cloudflare"
 
-        # Determine payment security type
-        payment_security_type = (
-            "Both 3D Secure and OTP Required" if is_3d_secure and is_otp_required else
-            "3D Secure" if is_3d_secure else
-            "OTP Required" if is_otp_required else
-            "2D (No extra security)"
-        )
-        
-        if captcha_detected:
-            payment_security_type += " | Captcha Detected"
-        if cloudflare_detected:
-            payment_security_type += " | Protected by Cloudflare"
+            inbuilt_status = "Yes" if inbuilt_payment else "No"
 
-        inbuilt_status = "Yes" if inbuilt_payment else "No"
+            logger.info(f"Successfully checked {url} - Status: {response.status}, Gateways: {len(detected_gateways)}")
+            return detected_gateways, response.status, captcha_detected, cloudflare_detected, payment_security_type, cvv_cvc_status, inbuilt_status
 
-        logger.info(f"Successfully checked {url} - Status: {response.status_code}, Gateways: {len(detected_gateways)}")
-        return detected_gateways, response.status_code, captcha_detected, cloudflare_detected, payment_security_type, cvv_cvc_status, inbuilt_status
-
-    except requests.exceptions.HTTPError as http_err:
-        status_code = http_err.response.status_code if http_err.response else 500
+    except aiohttp.ClientResponseError as http_err:
+        status_code = http_err.status
         logger.error(f"HTTP error checking {url}: {status_code} - {str(http_err)}")
         
         if status_code == 403:
@@ -93,14 +103,19 @@ def check_url(url: str) -> Tuple[List[str], int, bool, bool, str, str, str]:
         else:
             return [], status_code, False, False, f"HTTP Error: {status_code}", "N/A", "N/A"
             
-    except requests.exceptions.Timeout:
+    except aiohttp.ServerTimeoutError:
         logger.error(f"Timeout while checking {url}")
         return [], 408, False, False, "Request Timeout", "N/A", "N/A"
         
-    except requests.exceptions.ConnectionError as conn_err:
+    except aiohttp.ClientConnectionError as conn_err:
         logger.error(f"Connection error checking {url}: {str(conn_err)}")
         return [], 503, False, False, "Connection Error", "N/A", "N/A"
         
-    except requests.exceptions.RequestException as e:
+    except Exception as e:
         logger.error(f"Request exception checking {url}: {str(e)}")
         return [], 500, False, False, f"Error: {str(e)}", "N/A", "N/A"
+    
+    finally:
+        # Close session if we created it
+        if close_session:
+            await session.close()

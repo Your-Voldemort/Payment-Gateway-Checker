@@ -216,22 +216,53 @@ def handle_text(message):
         f"🔄 Processing {len(urls)} URL(s)... Please wait."
     )
     
-    results = []
-    for url in urls:
-        logger.info(f"User {user_id} checking URL: {url}")
+    # Process URLs asynchronously
+    import asyncio
+    import aiohttp
+    
+    async def process_urls_async():
+        """Process all URLs concurrently."""
+        results = []
         
-        try:
-            detected_gateways, status_code, captcha, cloudflare, payment_security_type, cvv_cvc_status, inbuilt_status = check_url(url)
+        # Create a shared session for all requests
+        async with aiohttp.ClientSession() as session:
+            # Create tasks for all URLs
+            tasks = []
+            for url in urls:
+                logger.info(f"User {user_id} checking URL: {url}")
+                tasks.append(check_url(url, session))
             
-            result_line = format_url_result(
-                url, detected_gateways, status_code, captcha,
-                cloudflare, payment_security_type, cvv_cvc_status, inbuilt_status
-            )
-            results.append(result_line)
+            # Execute all checks concurrently
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
             
-        except Exception as e:
-            logger.error(f"Error processing URL {url}: {str(e)}")
-            results.append(f"🔹 URL: {url}\n❌ Error: {str(e)}\n━━━━━━━━━━━━━━\n")
+            # Format results
+            for url, response in zip(urls, responses):
+                try:
+                    if isinstance(response, Exception):
+                        logger.error(f"Error processing URL {url}: {str(response)}")
+                        results.append(f"🔹 URL: {url}\n❌ Error: {str(response)}\n━━━━━━━━━━━━━━\n")
+                    else:
+                        detected_gateways, status_code, captcha, cloudflare, payment_security_type, cvv_cvc_status, inbuilt_status = response
+                        result_line = format_url_result(
+                            url, detected_gateways, status_code, captcha,
+                            cloudflare, payment_security_type, cvv_cvc_status, inbuilt_status
+                        )
+                        results.append(result_line)
+                except Exception as e:
+                    logger.error(f"Error formatting result for {url}: {str(e)}")
+                    results.append(f"🔹 URL: {url}\n❌ Error: {str(e)}\n━━━━━━━━━━━━━━\n")
+        
+        return results
+    
+    # Run the async function
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        results = loop.run_until_complete(process_urls_async())
+        loop.close()
+    except Exception as e:
+        logger.error(f"Error in async processing: {str(e)}")
+        results = [f"❌ System error: {str(e)}"]
     
     # Delete processing message
     try:
