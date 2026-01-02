@@ -7,6 +7,8 @@ from gateway_checker import check_url
 from user_manager import load_user_ids, save_user_id, get_user_count, is_user_registered
 from rate_limiter import RateLimiter
 from utils import format_url_result, normalize_url
+from async_manager import run_async, shutdown_async_manager
+from http_client import get_http_session, close_http_client
 
 # Initialize logger
 logger = setup_logger()
@@ -379,49 +381,31 @@ def handle_text(message):
         parse_mode='Markdown'
     )
     
-    # Process URLs asynchronously
+    # Process URLs asynchronously using persistent event loop and connection pool
     import asyncio
-    import aiohttp
-    
+
     async def process_urls_async():
-        """Process all URLs concurrently."""
+        """Process all URLs concurrently using persistent HTTP client."""
         results = []
-        
-        # Create a shared session for all requests
-        async with aiohttp.ClientSession() as session:
-            # Create tasks for all URLs
-            tasks = []
-            for url in urls:
-                logger.info(f"User {user_id} checking URL: {url}")
-                tasks.append(check_url(url, session))
-            
-            # Execute all checks concurrently
-            responses = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Format results
-            for url, response in zip(urls, responses):
-                try:
-                    if isinstance(response, Exception):
-                        logger.error(f"Error processing URL {url}: {str(response)}")
-                        error_display = str(response)[:50] + "..." if len(str(response)) > 50 else str(response)
-                        results.append(
-                            f"┌──────────────────────────\n"
-                            f"│ 🌐 `{url[:42] + '...' if len(url) > 45 else url}`\n"
-                            f"│ 🔴 *ERROR*\n"
-                            f"├──────────────────────────\n"
-                            f"│ _{error_display}_\n"
-                            f"└──────────────────────────\n\n"
-                        )
-                    else:
-                        detected_gateways, status_code, captcha, cloudflare, payment_security_type, cvv_cvc_status, inbuilt_status = response
-                        result_line = format_url_result(
-                            url, detected_gateways, status_code, captcha,
-                            cloudflare, payment_security_type, cvv_cvc_status, inbuilt_status
-                        )
-                        results.append(result_line)
-                except Exception as e:
-                    logger.error(f"Error formatting result for {url}: {str(e)}")
-                    error_display = str(e)[:50] + "..." if len(str(e)) > 50 else str(e)
+
+        # Get the shared HTTP session from the persistent client
+        session = await get_http_session()
+
+        # Create tasks for all URLs
+        tasks = []
+        for url in urls:
+            logger.info(f"User {user_id} checking URL: {url}")
+            tasks.append(check_url(url, session))
+
+        # Execute all checks concurrently
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Format results
+        for url, response in zip(urls, responses):
+            try:
+                if isinstance(response, Exception):
+                    logger.error(f"Error processing URL {url}: {str(response)}")
+                    error_display = str(response)[:50] + "..." if len(str(response)) > 50 else str(response)
                     results.append(
                         f"┌──────────────────────────\n"
                         f"│ 🌐 `{url[:42] + '...' if len(url) > 45 else url}`\n"
@@ -430,15 +414,31 @@ def handle_text(message):
                         f"│ _{error_display}_\n"
                         f"└──────────────────────────\n\n"
                     )
-        
+                else:
+                    detected_gateways, status_code, captcha, cloudflare, payment_security_type, cvv_cvc_status, inbuilt_status = response
+                    result_line = format_url_result(
+                        url, detected_gateways, status_code, captcha,
+                        cloudflare, payment_security_type, cvv_cvc_status, inbuilt_status
+                    )
+                    results.append(result_line)
+            except Exception as e:
+                logger.error(f"Error formatting result for {url}: {str(e)}")
+                error_display = str(e)[:50] + "..." if len(str(e)) > 50 else str(e)
+                results.append(
+                    f"┌──────────────────────────\n"
+                    f"│ 🌐 `{url[:42] + '...' if len(url) > 45 else url}`\n"
+                    f"│ 🔴 *ERROR*\n"
+                    f"├──────────────────────────\n"
+                    f"│ _{error_display}_\n"
+                    f"└──────────────────────────\n\n"
+                )
+
         return results
-    
-    # Run the async function
+
+    # Run the async function using persistent background event loop
+    # This avoids creating/destroying event loops per request
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        results = loop.run_until_complete(process_urls_async())
-        loop.close()
+        results = run_async(process_urls_async(), timeout=60)
     except Exception as e:
         logger.error(f"Error in async processing: {str(e)}")
         results = [
@@ -504,65 +504,87 @@ def main():
     logger.info("Starting bot polling...")
     logger.info(f"Bot username: @voldeGatewayhunterBot")
     logger.info(f"Owner ID: {Config.OWNER_USER_ID}")
-    
+
+    # Log performance optimization status
+    logger.info("Performance optimizations enabled:")
+    logger.info("  - Persistent background event loop (no per-request loop creation)")
+    logger.info("  - HTTP connection pooling (100 total, 10 per host)")
+    logger.info("  - User cache with 60s TTL (reduced disk I/O)")
+
+    # Check for Aho-Corasick availability
+    try:
+        from pattern_matcher import is_ahocorasick_available
+        if is_ahocorasick_available():
+            logger.info("  - Aho-Corasick algorithm for fast pattern matching")
+        else:
+            logger.info("  - Regex-based pattern matching (install pyahocorasick for 10-20x speedup)")
+    except ImportError:
+        pass
+
     retry_count = 0
     max_retries = 5
     base_delay = 5  # Base delay in seconds
     max_delay = 60  # Maximum delay between retries
-    
-    while True:
-        try:
-            logger.info("Bot is now polling for updates...")
-            bot.polling(none_stop=True, interval=1, timeout=30)
-            
-        except KeyboardInterrupt:
-            logger.info("Bot stopped by The Owner (KeyboardInterrupt). Exiting...")
-            break
-            
-        except telebot.apihelper.ApiException as e:
-            # Handle Telegram API specific errors
-            logger.error(f"Telegram API error: {str(e)}")
-            retry_count += 1
-            
-            if retry_count >= max_retries:
-                logger.critical(f"Max retries ({max_retries}) reached. Stopping bot.")
+
+    try:
+        while True:
+            try:
+                logger.info("Bot is now polling for updates...")
+                bot.polling(none_stop=True, interval=1, timeout=30)
+
+            except KeyboardInterrupt:
+                logger.info("Bot stopped by The Owner (KeyboardInterrupt). Exiting...")
                 break
-            
-            # Calculate exponential backoff delay
-            delay = min(base_delay * (2 ** (retry_count - 1)), max_delay)
-            logger.info(f"Retrying in {delay} seconds... (Attempt {retry_count}/{max_retries})")
-            
-            time.sleep(delay)
-            
-        except Exception as e:
-            # Handle all other exceptions (including ReadTimeout)
-            error_msg = str(e)
-            logger.error(f"Error occurred: {error_msg}")
-            
-            # Check if it's a timeout error
-            if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
-                logger.warning("Network timeout detected. Attempting to reconnect...")
+
+            except telebot.apihelper.ApiException as e:
+                # Handle Telegram API specific errors
+                logger.error(f"Telegram API error: {str(e)}")
                 retry_count += 1
-                
+
                 if retry_count >= max_retries:
-                    logger.critical(f"Max retries ({max_retries}) reached after timeout errors. Stopping bot.")
+                    logger.critical(f"Max retries ({max_retries}) reached. Stopping bot.")
                     break
-                
+
                 # Calculate exponential backoff delay
                 delay = min(base_delay * (2 ** (retry_count - 1)), max_delay)
-                logger.info(f"Reconnecting in {delay} seconds... (Attempt {retry_count}/{max_retries})")
-                
+                logger.info(f"Retrying in {delay} seconds... (Attempt {retry_count}/{max_retries})")
+
                 time.sleep(delay)
+
+            except Exception as e:
+                # Handle all other exceptions (including ReadTimeout)
+                error_msg = str(e)
+                logger.error(f"Error occurred: {error_msg}")
+
+                # Check if it's a timeout error
+                if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
+                    logger.warning("Network timeout detected. Attempting to reconnect...")
+                    retry_count += 1
+
+                    if retry_count >= max_retries:
+                        logger.critical(f"Max retries ({max_retries}) reached after timeout errors. Stopping bot.")
+                        break
+
+                    # Calculate exponential backoff delay
+                    delay = min(base_delay * (2 ** (retry_count - 1)), max_delay)
+                    logger.info(f"Reconnecting in {delay} seconds... (Attempt {retry_count}/{max_retries})")
+
+                    time.sleep(delay)
+                else:
+                    # For non-timeout errors, log and re-raise
+                    logger.critical(f"Unexpected error: {error_msg}")
+                    logger.exception("Full traceback:")
+                    break
             else:
-                # For non-timeout errors, log and re-raise
-                logger.critical(f"Unexpected error: {error_msg}")
-                logger.exception("Full traceback:")
-                break
-        else:
-            # Reset retry count on successful connection
-            if retry_count > 0:
-                logger.info("Successfully reconnected. Resetting retry counter.")
-                retry_count = 0
+                # Reset retry count on successful connection
+                if retry_count > 0:
+                    logger.info("Successfully reconnected. Resetting retry counter.")
+                    retry_count = 0
+    finally:
+        # Graceful shutdown of async resources
+        logger.info("Shutting down async resources...")
+        shutdown_async_manager()
+        logger.info("Shutdown complete.")
 
 
 if __name__ == "__main__":
