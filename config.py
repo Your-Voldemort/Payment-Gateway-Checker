@@ -39,19 +39,593 @@ class Config:
             raise ValueError("OWNER_USER_ID is not set in environment variables")
         return True
 
-# Payment gateway list
-PAYMENT_GATEWAYS = [
-    "paypal", "stripe", "braintree", "square", "cybersource", "authorize.net", "2checkout",
-    "adyen", "worldpay", "sagepay", "checkout.com", "shopify", "razorpay", "bolt", "paytm",
-    "venmo", "pay.google.com", "revolut", "eway", "woocommerce", "upi", "apple.com", "payflow",
-    "payeezy", "paddle", "payoneer", "recurly", "klarna", "paysafe", "webmoney", "payeer",
-    "payu", "skrill", "affirm", "afterpay", "dwolla", "global payments", "moneris", "nmi",
-    "payment cloud", "paysimple", "paytrace", "stax", "alipay", "bluepay", "paymentcloud",
-    "clover", "zelle", "google pay", "cashapp", "wechat pay", "transferwise", "stripe connect",
-    "mollie", "sezzle", "payza", "gocardless", "bitpay", "sureship",
-    "conekta", "fatture in cloud", "payzaar", "securionpay", "paylike", "nexi",
-    "kiosk information systems", "adyen marketpay", "forte", "worldline", "payu latam"
+# =============================================================================
+# PAYMENT GATEWAY DETECTION SYSTEM
+# =============================================================================
+# Organized by category for maintainability. Detection uses case-insensitive
+# substring matching against HTML response text, including:
+# - Brand names and company identifiers
+# - JavaScript SDK/library references
+# - API endpoint patterns
+# - CSS class names and HTML identifiers
+# - Form action URLs and iframe sources
+# =============================================================================
+
+# --- MAJOR GLOBAL PROCESSORS ---
+GATEWAYS_GLOBAL_MAJOR = [
+    # Stripe ecosystem
+    "stripe", "stripe.com", "js.stripe.com", "stripe-js", "stripe.js", "stripe connect",
+    "stripe elements", "stripe checkout", "stripepayments", "pk_live_", "pk_test_",
+    # PayPal ecosystem
+    "paypal", "paypal.com", "paypalobjects.com", "braintree", "braintree-api",
+    "braintreepayments", "braintree-web", "venmo", "paypal-button", "paypal-checkout",
+    # Adyen
+    "adyen", "adyen.com", "adyencheckout", "adyen-checkout", "adyen marketpay",
+    "adyen-cse", "adyen-web", "adyenjs",
+    # Checkout.com
+    "checkout.com", "frames.checkout.com", "cko-", "cko-card-number",
+    # Worldpay / FIS
+    "worldpay", "worldpay.com", "worldpay.js", "worldline", "fisglobal",
+    # Square
+    "square", "squareup.com", "squarecdn.com", "sq-payment-form", "square-payment",
+    # Authorize.Net variants
+    "authorize.net", "authorizenet", "authorize-net", "accept.js", "acceptcore",
+    "anet-", "authnet-",
+    # CyberSource (Visa)
+    "cybersource", "cybersource.com", "flex-microform", "cybs-",
+    # Global Payments / TSYS
+    "global payments", "globalpayments", "globalpay", "tsys", "heartland",
+    "heartlandpaymentsystems", "hps-", "portico",
+    # Fiserv / First Data
+    "fiserv", "firstdata", "first data", "payeezy", "clover", "clover.com",
 ]
+
+# --- EUROPEAN PROCESSORS ---
+GATEWAYS_EUROPE = [
+    # Mollie (Netherlands)
+    "mollie", "mollie.com", "molliecdn", "mollie-components",
+    # Klarna (Sweden) - BNPL
+    "klarna", "klarna.com", "klarna-checkout", "klarna-payments", "klarnacdn",
+    "klarna-widget", "klarna-osm", "klarna_payments",
+    # Adyen (Netherlands) - already in global
+    # Stripe (Ireland/US) - already in global
+    # SagePay / Opayo (UK)
+    "sagepay", "opayo", "sage pay", "opayo.co.uk",
+    # Worldline (EU)
+    "worldline", "ingenico", "ogone", "payvision",
+    # Nexi (Italy)
+    "nexi", "nexi.it", "nexipay", "cartasi",
+    # Paylike (Denmark)
+    "paylike", "paylike.io",
+    # SecurionPay (Switzerland)
+    "securionpay", "securionpay.com",
+    # Trustly (Sweden) - Open Banking
+    "trustly", "trustly.com", "trustly.net",
+    # iDEAL (Netherlands)
+    "ideal", "ideal-payment", "ideal.nl", "idealcheckout",
+    # Sofort/Sofortüberweisung (Germany)
+    "sofort", "sofortüberweisung", "sofort.com", "sofortbanking",
+    # Giropay (Germany)
+    "giropay", "giropay.de",
+    # Bancontact (Belgium)
+    "bancontact", "bancontact.com", "bcmc", "payconiq",
+    # Przelewy24 / P24 (Poland)
+    "przelewy24", "p24", "przelewy24.pl", "dotpay", "tpay",
+    # Blik (Poland)
+    "blik", "blik.com",
+    # EPS (Austria)
+    "eps-überweisung", "eps.or.at",
+    # Multibanco (Portugal)
+    "multibanco", "sibs",
+    # PayU Europe
+    "payu", "payu.com", "payu latam", "payu.pl", "payu.in",
+    # Paysera (Lithuania)
+    "paysera", "paysera.com",
+    # Paysafe ecosystem
+    "paysafe", "paysafecard", "skrill", "neteller", "paysafe.com",
+    # Revolut Pay
+    "revolut", "revolut.com", "revolut pay",
+    # Viva Wallet (Greece)
+    "vivawallet", "viva.com", "viva wallet",
+    # Swedbank Pay (Nordics)
+    "swedbank pay", "swedbankpay", "payex",
+    # SEB (Baltics)
+    "sebpay",
+    # Stripe (Ireland) - duplicate for region clarity
+]
+
+# --- ASIA-PACIFIC PROCESSORS ---
+GATEWAYS_APAC = [
+    # India
+    "razorpay", "razorpay.com", "rzp-", "checkout.razorpay.com",
+    "paytm", "paytm.com", "paytmpayments", "paytmcdn",
+    "phonepe", "phonepe.com",
+    "juspay", "juspay.in",
+    "cashfree", "cashfree.com",
+    "payu india", "payubiz",
+    "ccavenue", "ccavenue.com",
+    "instamojo", "instamojo.com",
+    "billdesk", "billdesk.com",
+    "upi", "bhim", "upi://", "@upi", "upipay",
+    "mobikwik", "freecharge", "airtel money india",
+    # China
+    "alipay", "alipay.com", "alipayobjects", "alipayplus",
+    "wechat pay", "wechatpay", "wxpay", "tenpay", "weixin.qq.com",
+    "unionpay", "unionpayintl", "chinapay",
+    "jdpay", "jd.com/pay",
+    # Japan
+    "paypay", "paypay.ne.jp",
+    "line pay", "linepay", "pay.line.me",
+    "rakuten pay", "rakuten.co.jp",
+    "konbini", "lawson", "familymart", "7-eleven pay", "ministop",
+    "merpay", "mercari",
+    "d払い", "d-payment", "docomo",
+    "au pay", "aupay",
+    "paidy", "paidy.com",
+    "gmo payment", "gmo-pg", "gmopg",
+    "softbank payment",
+    "veritrans", "veritrans.co.jp",
+    # South Korea
+    "naver pay", "naverpay", "pay.naver.com",
+    "kakao pay", "kakaopay", "pg.kakao.com",
+    "toss", "tosspayments", "toss.im",
+    "samsung pay", "samsungpay",
+    "lg u+", "payco",
+    "inicis", "kg inicis",
+    "nicepay korea", "nicepayments",
+    # Southeast Asia
+    "grabpay", "grab pay", "grab.com",
+    "gcash", "gcash.com",
+    "paymaya", "maya.ph",
+    "touch n go", "touchngo", "tngdigital",
+    "shopee pay", "shopeepay", "shopee.com",
+    "lazada wallet",
+    "ovo", "ovo.id",
+    "dana", "dana.id",
+    "gopay", "gojek",
+    "momo vietnam", "momo.vn",
+    "zalopay", "zalo pay",
+    "vnpay", "vnpay.vn",
+    "payoo",
+    "dragonpay", "dragonpay.ph",
+    "2c2p", "2c2p.com",
+    "omise", "omise.co",
+    "xendit", "xendit.co",
+    "ipay88", "ipay88.com",
+    "billplz",
+    "senangpay",
+    "razer pay", "razerpay", "mol",
+    # Australia/New Zealand
+    "afterpay", "afterpay.com", "clearpay",
+    "zip pay", "zippay", "zip.co", "quadpay",
+    "humm", "humm-group", "bundll",
+    "laybuy",
+    "bpay", "bpay.com.au",
+    "poli", "poli payments", "polipayments",
+    "eway", "eway.com.au",
+    "payway australia",
+    "anz egate",
+    "securepay australia",
+    "fatzebra", "fat zebra",
+    "pin payments", "pinpayments",
+    "tyro", "tyro.com",
+]
+
+# --- MIDDLE EAST & AFRICA ---
+GATEWAYS_MEA = [
+    # Middle East
+    "fawry", "fawry.com", "myfawry",
+    "telr", "telr.com",
+    "paytabs", "paytabs.com",
+    "payfort", "amazon payment services", "aps.amazon.ae",
+    "hyperpay", "hyperpay.com",
+    "tap payments", "tap.company", "tappayments",
+    "moyasar", "moyasar.com",
+    "paylink.sa",
+    "checkout.com mena",
+    "network international",
+    "paymob", "paymob.com",
+    "thawani",
+    "tamara", "tamara.co", "tabby", "tabby.ai",
+    "postpay",
+    "spotii",
+    "cashew payments",
+    # Africa - Pan-African
+    "flutterwave", "flutterwave.com", "flw-", "rave.flutterwave",
+    "paystack", "paystack.com", "paystack.co", "js.paystack.co",
+    "interswitch", "interswitch.com", "webpay.interswitchng",
+    "dusupay", "dusupay.com",
+    "yoco", "yoco.co.za",
+    "peach payments",
+    "paygate south africa", "paygate.co.za",
+    "ozow", "i-pay", "ipay africa",
+    "pawapay",
+    "chipper cash", "chippercash",
+    "cellulant",
+    "korapay",
+    # Mobile Money
+    "m-pesa", "mpesa", "safaricom",
+    "mtn mobile money", "mtn momo", "momo.mtn",
+    "airtel money", "airtelmoney",
+    "orange money", "orangemoney",
+    "tigo pesa", "tigopesa",
+    "vodacom", "vodafone cash",
+    "ecocash",
+    "equitel",
+]
+
+# --- LATIN AMERICA ---
+GATEWAYS_LATAM = [
+    # Mercado Pago (Argentina/LatAm)
+    "mercado pago", "mercadopago", "mercadolibre",
+    # PagSeguro / PagBank (Brazil)
+    "pagseguro", "pagseguro.com.br", "pagbank",
+    # EBANX (Brazil-focused)
+    "ebanx", "ebanx.com", "ebanxpay",
+    # dLocal (Uruguay)
+    "dlocal", "dlocal.com",
+    # OpenPay (Mexico)
+    "openpay", "openpay.mx",
+    # Conekta (Mexico)
+    "conekta", "conekta.io", "conekta.com",
+    # PayU Latin America
+    "payu latam", "payulatam",
+    # OXXO (Mexico cash)
+    "oxxo", "oxxopay",
+    # Boleto (Brazil)
+    "boleto", "boleto bancário", "boletobancario",
+    # PIX (Brazil)
+    "pix", "pix.bcb", "bcb.gov.br/pix", "pixpay",
+    # Nubank
+    "nubank", "nupay",
+    # PicPay
+    "picpay", "picpay.com",
+    # Cielo (Brazil)
+    "cielo", "cielo.com.br",
+    # Rede (Brazil)
+    "userede", "rede.com.br",
+    # GetNet (Brazil)
+    "getnet", "getnet.com.br",
+    # SafetyPay
+    "safetypay",
+    # Todito Cash
+    "toditocash", "todito",
+    # Kushki (Ecuador)
+    "kushki", "kushkipagos",
+    # Transbank (Chile)
+    "transbank", "webpay", "webpay.cl",
+    # Khipu (Chile)
+    "khipu",
+    # Nequi (Colombia)
+    "nequi",
+    # Daviplata (Colombia)
+    "daviplata",
+    # PSE (Colombia)
+    "pse", "pagos seguros en línea",
+    # Yape (Peru)
+    "yape", "yape.com.pe",
+    # Plin (Peru)
+    "plin",
+    # Culqi (Peru)
+    "culqi", "culqi.com",
+    # Flow (Chile)
+    "flow.cl", "flowpayments",
+]
+
+# --- CRYPTOCURRENCY PAYMENT PROCESSORS ---
+GATEWAYS_CRYPTO = [
+    # Major crypto processors
+    "bitpay", "bitpay.com", "bp_hosted", "bitpay-hosted",
+    "coinbase commerce", "commerce.coinbase.com", "coinbase-commerce",
+    "coingate", "coingate.com",
+    "nowpayments", "nowpayments.io", "now-payments",
+    "btcpay", "btcpay server", "btcpayserver",
+    "opennode", "opennode.com",
+    "blockonomics", "blockonomics.co",
+    "coinpayments", "coinpayments.net",
+    "cryptomus",
+    "plisio",
+    "triple-a", "triple-a.io",
+    "paybear",
+    "globee",
+    "coindirect",
+    "utrust", "utrust.com",
+    "coinspaid",
+    "spectrocoin",
+    "bitaps",
+    "blockchain.com/pay",
+    "binance pay", "binancepay",
+    "crypto.com pay",
+    "paywithterra",
+    "moonpay", "moonpay.com",
+    "transak",
+    "ramp network",
+    "simplex",
+    "wyre",
+    "banxa",
+    "alchemy pay",
+]
+
+# --- BUY NOW PAY LATER (BNPL) ---
+GATEWAYS_BNPL = [
+    # Major BNPL
+    "klarna",  # also in Europe
+    "afterpay", "clearpay",
+    "affirm", "affirm.com", "affirm-js",
+    "sezzle", "sezzle.com", "sezzle-widget",
+    "zip", "zip pay", "zip.co", "quadpay",
+    # Regional BNPL
+    "laybuy",
+    "humm",
+    "openpay bnpl",
+    "splitit", "splitit.com",
+    "perpay",
+    "paybright", "affirm.ca",
+    "scalapay", "scalapay.com",
+    "alma", "getalma.eu",
+    "oney",
+    "pledg",
+    "younited pay", "younitedpay",
+    "billie", "billie.io",
+    "riverty", "arvato",
+    # Middle East BNPL
+    "tamara", "tabby", "spotii", "postpay", "cashew",
+    # Shopify installments
+    "shop pay installments",
+    # Paypal BNPL
+    "pay in 4", "pay later paypal",
+]
+
+# --- B2B AND INVOICING PLATFORMS ---
+GATEWAYS_B2B = [
+    # B2B Payments
+    "bill.com", "billcom",
+    "tipalti", "tipalti.com",
+    "plastiq",
+    "melio", "meliopayments",
+    "divvy", "getdivvy",
+    "ramp", "ramp.com",
+    "brex", "brex.com",
+    "coupa pay",
+    "airbase",
+    "center",
+    "rippling",
+    "paymode-x",
+    "comdata",
+    "wex",
+    # Invoicing with payments
+    "stripe invoicing", "stripe billing",
+    "freshbooks", "freshbooks.com",
+    "xero", "xero.com",
+    "quickbooks payments", "intuit payments",
+    "wave", "waveapps",
+    "zoho invoice", "zoho payments",
+    "invoice ninja",
+    "square invoices",
+    "paypal invoicing",
+    "harvest", "getharvest.com",
+    # AR Automation
+    "versapay",
+    "plooto",
+    "routable",
+    "paystand",
+    "fundbox",
+    "bluevine",
+    "kabbage",
+    "ondeck",
+]
+
+# --- DIGITAL WALLETS ---
+GATEWAYS_WALLETS = [
+    # Global
+    "apple pay", "applepay", "apple.com/apple-pay", "pk.eyJ",
+    "google pay", "googlepay", "pay.google.com", "gpay",
+    "samsung pay", "samsungpay",
+    "amazon pay", "amazonpay", "payments.amazon",
+    "paypal", "paypal.com",
+    "venmo",
+    # Regional
+    "paytm wallet",
+    "phonepe",
+    "mobikwik",
+    "freecharge",
+    "alipay",
+    "wechat pay",
+    "line pay",
+    "kakao pay",
+    "grab pay",
+    "shopee pay",
+    "ovo",
+    "gopay",
+    "dana",
+    "gcash",
+    # E-money
+    "webmoney", "wmtransfer",
+    "payeer", "payeer.com",
+    "qiwi", "qiwi.com",
+    "yoomoney", "yandex money",
+    "paysafecard",
+    "neosurf",
+    "astropay", "astropaycard",
+    "ecovoucher",
+    "cashlib",
+]
+
+# --- SUBSCRIPTION & RECURRING BILLING ---
+GATEWAYS_SUBSCRIPTION = [
+    "recurly", "recurly.com", "js.recurly.com",
+    "chargebee", "chargebee.com", "cbjs",
+    "paddle", "paddle.com", "paddle.js", "paddle-js",
+    "fastspring", "fastspring.com",
+    "zuora", "zuora.com",
+    "chargify",
+    "pabbly",
+    "moonclerk",
+    "memberful",
+    "substack", "substack.com",
+    "gumroad", "gumroad.com",
+    "sellfy",
+    "podia",
+    "teachable payments",
+    "kajabi payments",
+    "thinkific payments",
+    "circle.so",
+    "buy me a coffee", "buymeacoffee",
+    "ko-fi", "ko-fi.com",
+    "patreon", "patreon.com",
+    "open collective",
+    "github sponsors",
+    "lemonsqueezy", "lemon squeezy",
+]
+
+# --- OPEN BANKING & ACCOUNT-TO-ACCOUNT ---
+GATEWAYS_OPEN_BANKING = [
+    # Open Banking initiators
+    "trustly",
+    "plaid", "plaid.com", "link.plaid.com",
+    "truelayer", "truelayer.com",
+    "tink", "tink.com",
+    "yodlee",
+    "finicity",
+    "mx",
+    "yapily",
+    "salt edge",
+    "token.io",
+    "volt", "volt.io",
+    "gocardless instant bank pay",
+    "ecospend",
+    "vyne",
+    "crezco",
+    # ACH/Direct Debit
+    "gocardless", "gc.js", "gocardless.com",
+    "dwolla", "dwolla.com",
+    "plaid ach",
+    "stripe ach",
+    "ach direct", "ach-debit",
+    "sepa direct debit", "sepa-dd",
+    "bacs direct debit",
+]
+
+# --- PAYMENT FACILITATION & WHITE-LABEL ---
+GATEWAYS_PAYFAC = [
+    # Payment Facilitators
+    "stripe connect",
+    "paypal commerce platform",
+    "adyen for platforms", "adyen marketpay",
+    "wepay", "wepay.com",
+    "finix",
+    "payoneer", "payoneer.com",
+    "payouts.com",
+    "hyperwallet",
+    "trolley",
+    "wise business", "transferwise business",
+    # White-label
+    "checkout.com", "cko-",
+    "payroc",
+    "nuvei", "nuvei.com",
+    "shift4", "shift4payments",
+    "paysafe", "paysafe.com",
+    "rapyd", "rapyd.net",
+    "payrix",
+    "stax", "staxpayments",
+    "helcim",
+    "dharma merchant",
+    "fattmerchant",
+    "gravity payments",
+    "payline data",
+    "payment depot",
+]
+
+# --- E-COMMERCE PLATFORMS WITH PAYMENTS ---
+GATEWAYS_ECOMMERCE = [
+    # Shopify
+    "shopify payments", "shop pay", "shopify.com/payments", "shopify-payment",
+    "shopify checkout",
+    # WooCommerce
+    "woocommerce", "woo.com", "woocommerce-gateway", "wc-", "woocommerce-payments",
+    # BigCommerce
+    "bigcommerce", "bigcommerce.com",
+    # Magento/Adobe Commerce
+    "magento", "braintree magento", "magento-payments",
+    # Squarespace
+    "squarespace commerce", "squarespace.com",
+    # Wix
+    "wix payments", "wix.com/payments",
+    # Ecwid
+    "ecwid", "ecwid.com",
+    # PrestaShop
+    "prestashop",
+    # OpenCart
+    "opencart",
+    # Volusion
+    "volusion",
+    # 3dcart/Shift4Shop
+    "3dcart", "shift4shop",
+    # Salesforce Commerce
+    "salesforce commerce", "demandware",
+]
+
+# --- SDK/LIBRARY DETECTION SIGNATURES ---
+# These are JavaScript includes, iframe sources, and API references
+GATEWAY_SIGNATURES = [
+    # Stripe
+    "js.stripe.com/v3", "stripe.com/v3", "stripe-card-element", "StripeCheckout",
+    # PayPal
+    "paypal.com/sdk/js", "paypalobjects.com", "paypal-buttons", "paypal-button-v2",
+    # Braintree
+    "js.braintreegateway.com", "braintree-web", "braintree.client",
+    # Adyen
+    "checkoutshopper-live.adyen.com", "adyen.com/checkoutshopper", "AdyenCheckout",
+    # Square
+    "js.squareup.com/v2", "squarecdn.com/js/sq-", "SqPaymentForm",
+    # Authorize.Net
+    "jstest.authorize.net", "js.authorize.net", "Accept.dispatchData",
+    # Klarna
+    "klarna.com/checkout/v3", "x.klarnacdn.net", "Klarna.Payments",
+    # Affirm
+    "cdn1.affirm.com", "affirm.js", "AffirmUI",
+    # Afterpay
+    "static.afterpay.com", "afterpay.js", "afterpayjs",
+    # Razorpay
+    "checkout.razorpay.com/v1", "Razorpay", "razorpay.js",
+    # Paytm
+    "securegw.paytm.in", "merchantpgpui.paytm.in",
+    # Mollie
+    "js.mollie.com", "mollie.Components",
+    # Google Pay
+    "pay.google.com/gp/p/js/pay.js", "google.payments", "GooglePayButton",
+    # Apple Pay
+    "apple-pay-button", "ApplePaySession",
+    # Checkout.com
+    "cdn.checkout.com/js", "Frames.init",
+    # Recurly
+    "js.recurly.com/v4", "recurly.configure",
+    # Chargebee
+    "js.chargebee.com", "Chargebee.init",
+    # 2Checkout/Verifone
+    "2checkout.com", "verifone.cloud",
+]
+
+# --- COMBINE ALL GATEWAYS ---
+PAYMENT_GATEWAYS = (
+    GATEWAYS_GLOBAL_MAJOR +
+    GATEWAYS_EUROPE +
+    GATEWAYS_APAC +
+    GATEWAYS_MEA +
+    GATEWAYS_LATAM +
+    GATEWAYS_CRYPTO +
+    GATEWAYS_BNPL +
+    GATEWAYS_B2B +
+    GATEWAYS_WALLETS +
+    GATEWAYS_SUBSCRIPTION +
+    GATEWAYS_OPEN_BANKING +
+    GATEWAYS_PAYFAC +
+    GATEWAYS_ECOMMERCE +
+    GATEWAY_SIGNATURES
+)
+
+# Remove duplicates while preserving order
+PAYMENT_GATEWAYS = list(dict.fromkeys(PAYMENT_GATEWAYS))
 
 # Security check keywords
 CAPTCHA_KEYWORDS = ['captcha', 'robot', 'verification', 'prove you are not a robot', 'challenge']

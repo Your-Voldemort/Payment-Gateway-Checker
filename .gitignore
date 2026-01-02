@@ -42,3 +42,4 @@ bot.log
 user_ids.txt.backup
 user_ids.json
 test_url_normalization.py
+Claude.md
