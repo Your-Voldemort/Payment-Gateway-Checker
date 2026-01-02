@@ -1,12 +1,9 @@
-"""Payment gateway checking functionality."""
+"""Payment gateway checking functionality with optimized detection."""
 import aiohttp
 from typing import Tuple, List
 from config import Config
-from utils import (
-    is_valid_url, find_payment_gateways, check_captcha, check_cloudflare,
-    check_3d_secure, check_otp_required, check_payment_info,
-    check_inbuilt_payment_system
-)
+from utils import is_valid_url
+from detection import analyze_url_response
 from user_agents import get_random_user_agent
 from logger import setup_logger
 
@@ -55,7 +52,7 @@ async def check_url(url: str, session: aiohttp.ClientSession = None) -> Tuple[Li
 
     try:
         logger.info(f"Checking URL: {url}")
-        
+
         timeout = aiohttp.ClientTimeout(total=Config.REQUEST_TIMEOUT)
         async with session.get(
             url,
@@ -66,33 +63,28 @@ async def check_url(url: str, session: aiohttp.ClientSession = None) -> Tuple[Li
         ) as response:
             response.raise_for_status()
             text = await response.text()
-            
-            # Perform all checks
-            detected_gateways = find_payment_gateways(text)
-            captcha_detected = check_captcha(text)
-            cloudflare_detected = check_cloudflare(response.headers, text)
-            is_3d_secure = check_3d_secure(text)
-            is_otp_required = check_otp_required(text)
-            cvv_cvc_status = check_payment_info(text)
-            inbuilt_payment = check_inbuilt_payment_system(text)
 
-            # Determine payment security type
-            payment_security_type = (
-                "Both 3D Secure and OTP Required" if is_3d_secure and is_otp_required else
-                "3D Secure" if is_3d_secure else
-                "OTP Required" if is_otp_required else
-                "2D (No extra security)"
+            # Use the new optimized detection module
+            # This provides word-boundary matching, SDK detection, and header analysis
+            analysis = analyze_url_response(
+                html=text,
+                headers=dict(response.headers),
+                status_code=response.status
             )
-            
-            if captcha_detected:
-                payment_security_type += " | Captcha Detected"
-            if cloudflare_detected:
-                payment_security_type += " | Protected by Cloudflare"
 
-            inbuilt_status = "Yes" if inbuilt_payment else "No"
+            logger.info(f"Successfully checked {url} - Status: {response.status}, "
+                       f"Gateways: {len(analysis['gateways'])} "
+                       f"(High confidence: {len(analysis['high_confidence_gateways'])})")
 
-            logger.info(f"Successfully checked {url} - Status: {response.status}, Gateways: {len(detected_gateways)}")
-            return detected_gateways, response.status, captcha_detected, cloudflare_detected, payment_security_type, cvv_cvc_status, inbuilt_status
+            return (
+                analysis['gateways'],
+                response.status,
+                analysis['captcha'],
+                analysis['cloudflare'],
+                analysis['security_type'],
+                analysis['cvv_status'],
+                analysis['inbuilt_status']
+            )
 
     except aiohttp.ClientResponseError as http_err:
         status_code = http_err.status

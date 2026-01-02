@@ -1,8 +1,9 @@
-"""User management functionality."""
+"""User management functionality with caching."""
 import os
 import json
 import tempfile
-from typing import Set, Dict, Any
+import time
+from typing import Set, Dict, Any, Optional
 from datetime import datetime
 from config import Config
 from logger import setup_logger
@@ -11,6 +12,70 @@ logger = setup_logger()
 
 # JSON file path (same directory as old txt file)
 JSON_FILE = Config.USER_IDS_FILE.replace('.txt', '.json')
+
+# =============================================================================
+# USER CACHE - Reduces disk I/O by caching registered users in memory
+# =============================================================================
+
+class UserCache:
+    """
+    In-memory cache for registered users with TTL-based expiration.
+
+    This significantly reduces disk I/O by avoiding JSON file reads
+    on every message. The cache automatically refreshes when:
+    - TTL expires (default 60 seconds)
+    - A new user is registered (immediate invalidation)
+    """
+
+    def __init__(self, ttl_seconds: int = 60):
+        self._cache: Optional[Set[int]] = None
+        self._cache_time: float = 0
+        self._ttl = ttl_seconds
+        self._lock_flag = False  # Simple lock to prevent race conditions
+
+    def _is_expired(self) -> bool:
+        """Check if cache has expired."""
+        return time.time() - self._cache_time > self._ttl
+
+    def _refresh_cache(self) -> Set[int]:
+        """Refresh cache from disk."""
+        if self._lock_flag:
+            # If another operation is in progress, return existing cache or empty set
+            return self._cache or set()
+
+        try:
+            self._lock_flag = True
+            self._cache = _load_user_ids_from_disk()
+            self._cache_time = time.time()
+            logger.debug(f"User cache refreshed with {len(self._cache)} users")
+            return self._cache
+        finally:
+            self._lock_flag = False
+
+    def get_users(self) -> Set[int]:
+        """Get all registered users (from cache if valid)."""
+        if self._cache is None or self._is_expired():
+            return self._refresh_cache()
+        return self._cache
+
+    def is_registered(self, user_id: int) -> bool:
+        """Check if a user is registered (uses cache)."""
+        return user_id in self.get_users()
+
+    def invalidate(self):
+        """Force cache invalidation (call after adding new user)."""
+        self._cache = None
+        self._cache_time = 0
+        logger.debug("User cache invalidated")
+
+    def add_user(self, user_id: int):
+        """Add user to cache without full refresh."""
+        if self._cache is not None:
+            self._cache.add(user_id)
+            logger.debug(f"User {user_id} added to cache")
+
+# Global cache instance
+_user_cache = UserCache(ttl_seconds=60)
 
 
 def _migrate_from_txt_to_json() -> None:
@@ -93,51 +158,85 @@ def _load_users_data() -> Dict[str, Any]:
         return {"users": {}, "metadata": {"version": "1.0"}}
 
 
-def load_user_ids() -> Set[int]:
+def _load_user_ids_from_disk() -> Set[int]:
     """
-    Load user IDs from the JSON storage.
-    
+    Load user IDs directly from JSON storage (bypasses cache).
+
+    This is used internally by the cache system.
+
     Returns:
         Set of user IDs
     """
     try:
         data = _load_users_data()
         user_ids = {user_data['user_id'] for user_data in data.get('users', {}).values()}
-        logger.info(f"Loaded {len(user_ids)} user IDs")
+        logger.debug(f"Loaded {len(user_ids)} user IDs from disk")
         return user_ids
     except Exception as e:
-        logger.error(f"Error loading user IDs: {str(e)}")
+        logger.error(f"Error loading user IDs from disk: {str(e)}")
         return set()
+
+
+def load_user_ids() -> Set[int]:
+    """
+    Load user IDs using the cache (recommended).
+
+    This function uses an in-memory cache with 60-second TTL to minimize
+    disk I/O. Most requests will be served from cache.
+
+    Returns:
+        Set of user IDs
+    """
+    return _user_cache.get_users()
+
+
+def is_user_registered(user_id: int) -> bool:
+    """
+    Check if a user is registered (optimized, uses cache).
+
+    This is faster than `user_id in load_user_ids()` because it
+    uses the cache's direct lookup method.
+
+    Args:
+        user_id: The Telegram user ID to check
+
+    Returns:
+        bool: True if registered, False otherwise
+    """
+    return _user_cache.is_registered(user_id)
 
 
 def save_user_id(user_id: int) -> bool:
     """
-    Save a new user ID to the JSON storage.
-    
+    Save a new user ID to the JSON storage and update cache.
+
     Args:
         user_id: The Telegram user ID to save
-        
+
     Returns:
         bool: True if successful, False otherwise
     """
     try:
         data = _load_users_data()
-        
+
         # Check if user already exists
         if str(user_id) in data['users']:
             logger.info(f"User ID {user_id} already registered")
             return True
-        
+
         # Add new user with metadata
         data['users'][str(user_id)] = {
             "user_id": user_id,
             "registered_at": datetime.now().isoformat(),
             "migrated": False
         }
-        
+
         # Write atomically
         _atomic_write_json(JSON_FILE, data)
-        
+
+        # Update cache immediately (avoid waiting for TTL expiration)
+        _user_cache.add_user(user_id)
+
         logger.info(f"Saved new user ID: {user_id}")
         return True
     except Exception as e:

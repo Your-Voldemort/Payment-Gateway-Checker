@@ -4,7 +4,7 @@ import telebot
 from config import Config
 from logger import setup_logger
 from gateway_checker import check_url
-from user_manager import load_user_ids, save_user_id, get_user_count
+from user_manager import load_user_ids, save_user_id, get_user_count, is_user_registered
 from rate_limiter import RateLimiter
 from utils import format_url_result, normalize_url
 
@@ -303,10 +303,9 @@ def handle_broadcast(message):
 def handle_text(message):
     """Handle text messages containing URLs."""
     user_id = message.from_user.id
-    
-    # Check if user is registered
-    registered_users = load_user_ids()
-    if user_id not in registered_users:
+
+    # Check if user is registered (uses cached lookup - no disk I/O)
+    if not is_user_registered(user_id):
         not_registered_msg = (
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"⚠️ *ACCESS REQUIRED*\n"
