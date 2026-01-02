@@ -6,14 +6,46 @@ This module provides improved detection accuracy through:
 2. JavaScript SDK pattern detection for modern payment forms
 3. Confidence scoring to prioritize high-value matches
 4. Structured pattern categories for better organization
+5. BeautifulSoup HTML parsing for structured element analysis (Part 3.2)
 """
 import re
-from typing import Dict, List, Tuple, NamedTuple
+from typing import Dict, List, Tuple, NamedTuple, Optional
 from dataclasses import dataclass
 from enum import Enum
 from logger import setup_logger
 
 logger = setup_logger()
+
+# Import HTML parser module for structured analysis
+# Provides BeautifulSoup-based structured element detection (Part 3.2)
+HTML_PARSER_AVAILABLE = False
+parse_html_structure = None
+detect_gateways_from_html_structure = None
+detect_inbuilt_payment_from_structure = None
+get_payment_form_details = None
+HTMLStructure = None
+
+try:
+    from html_parser import (
+        parse_html_structure as _parse_html_structure,
+        detect_gateways_from_html_structure as _detect_gateways,
+        detect_inbuilt_payment_from_structure as _detect_inbuilt,
+        get_payment_form_details as _get_form_details,
+        BS4_AVAILABLE,
+        HTMLStructure as _HTMLStructure,
+    )
+    if BS4_AVAILABLE:
+        HTML_PARSER_AVAILABLE = True
+        parse_html_structure = _parse_html_structure
+        detect_gateways_from_html_structure = _detect_gateways
+        detect_inbuilt_payment_from_structure = _detect_inbuilt
+        get_payment_form_details = _get_form_details
+        HTMLStructure = _HTMLStructure
+        logger.info("Structured HTML parsing enabled (BeautifulSoup available)")
+    else:
+        logger.warning("BeautifulSoup not installed. Structured HTML parsing disabled.")
+except ImportError:
+    logger.warning("HTML parser module not available. Structured analysis disabled.")
 
 
 class ConfidenceLevel(Enum):
@@ -853,10 +885,11 @@ def analyze_url_response(
 
     This is the main entry point that combines all detection methods:
     1. Payment gateway detection (SDK, form, word patterns)
-    2. Security feature detection (3DS, OTP, CAPTCHA)
-    3. Header analysis (payment hints, security headers)
-    4. CVV/CVC requirement detection
-    5. Inbuilt payment system detection
+    2. Structured HTML parsing for scripts, forms, iframes (Part 3.2)
+    3. Security feature detection (3DS, OTP, CAPTCHA)
+    4. Header analysis (payment hints, security headers)
+    5. CVV/CVC requirement detection
+    6. Inbuilt payment system detection
 
     Args:
         html: Response HTML content
@@ -866,8 +899,49 @@ def analyze_url_response(
     Returns:
         Comprehensive analysis dictionary
     """
-    # Gateway detection
+    # Gateway detection using regex patterns
     gateway_names, gateway_matches = find_payment_gateways_optimized(html)
+
+    # Structured HTML parsing for enhanced detection (Part 3.2)
+    html_structure = None
+    structured_detections = {}
+    payment_form_details = {}
+    
+    if HTML_PARSER_AVAILABLE:
+        try:
+            # Parse HTML structure to extract scripts, forms, iframes
+            html_structure = parse_html_structure(html)
+            
+            # Get gateway detections from structured analysis
+            structured_detections = html_structure.detected_gateways
+            
+            # Merge structured detections with regex detections
+            # Structured detections often have higher confidence
+            for gateway, confidence in structured_detections.items():
+                if gateway not in gateway_matches:
+                    gateway_names.append(gateway)
+                    gateway_matches[gateway] = GatewayMatch(
+                        name=gateway,
+                        confidence=confidence,
+                        evidence="Structured HTML analysis",
+                        category="HTML Structure"
+                    )
+                elif gateway_matches[gateway].confidence < confidence:
+                    # Update with higher confidence from structured analysis
+                    gateway_matches[gateway] = GatewayMatch(
+                        name=gateway,
+                        confidence=confidence,
+                        evidence="Structured HTML analysis",
+                        category="HTML Structure"
+                    )
+            
+            # Get payment form details for extended results
+            payment_form_details = get_payment_form_details(html)
+            
+            logger.debug(f"Structured analysis: {len(structured_detections)} additional gateways, "
+                        f"has_payment_form={html_structure.has_payment_form}")
+        except Exception as e:
+            logger.warning(f"Structured HTML analysis failed: {e}")
 
     # Security features
     security = check_security_features(html, headers)
@@ -878,8 +952,13 @@ def analyze_url_response(
     # CVV/CVC detection
     cvv_status = check_cvv_requirement(html)
 
-    # Inbuilt payment detection
-    has_inbuilt, inbuilt_components = check_inbuilt_payment_system(html)
+    # Inbuilt payment detection - use structured analysis if available
+    if HTML_PARSER_AVAILABLE and html_structure and html_structure.parse_successful:
+        # Use structured detection for more accurate inbuilt form detection
+        has_inbuilt, inbuilt_components = detect_inbuilt_payment_from_structure(html)
+    else:
+        # Fall back to regex-based detection
+        has_inbuilt, inbuilt_components = check_inbuilt_payment_system(html)
 
     # Merge header-detected payment hints with gateway detection
     for hint in header_analysis['payment_hints']:
@@ -907,6 +986,13 @@ def analyze_url_response(
     if security['cloudflare'] or header_analysis['protection']['cloudflare']:
         security_type += " | Protected by Cloudflare"
 
+    # Sort gateway names by confidence (highest first)
+    gateway_names = sorted(
+        gateway_names,
+        key=lambda g: gateway_matches.get(g, GatewayMatch(g, 0, "", "")).confidence,
+        reverse=True
+    )
+
     return {
         # Primary results (backward compatible)
         'gateways': gateway_names,
@@ -923,4 +1009,10 @@ def analyze_url_response(
         'header_analysis': header_analysis,
         'inbuilt_components': inbuilt_components,
         'high_confidence_gateways': filter_high_confidence_gateways(gateway_matches, 0.7),
+        
+        # Structured analysis results (Part 3.2)
+        'html_structure_available': HTML_PARSER_AVAILABLE and html_structure is not None,
+        'structured_detections': structured_detections,
+        'payment_form_details': payment_form_details,
+        'has_payment_form': payment_form_details.get('has_payment_form', False) if payment_form_details else False,
     }
