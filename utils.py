@@ -186,7 +186,7 @@ def format_url_result(
 ) -> str:
     """
     Format the URL check result into a readable message.
-    
+
     Args:
         url: The checked URL
         detected_gateways: List of detected payment gateways
@@ -196,38 +196,101 @@ def format_url_result(
         payment_security_type: Type of payment security
         cvv_cvc_status: CVV/CVC requirement status
         inbuilt_status: Inbuilt payment system status
-        
+
     Returns:
         str: Formatted result string
     """
-    # Format gateways with better presentation
-    if detected_gateways:
-        gateways_str = f"*{', '.join(detected_gateways)}*"
-        gateway_emoji = "💳"
+    # URL display (truncate if too long for readability)
+    display_url = url if len(url) <= 45 else url[:42] + "..."
+
+    # Status indicator with color coding
+    if status_code == 200:
+        status_display = f"🟢 {status_code} OK"
+    elif status_code in [301, 302, 303, 307, 308]:
+        status_display = f"🟡 {status_code} Redirect"
+    elif status_code == 403:
+        status_display = f"🟠 {status_code} Forbidden"
+    elif status_code == 404:
+        status_display = f"🔴 {status_code} Not Found"
+    elif status_code >= 500:
+        status_display = f"🔴 {status_code} Server Error"
     else:
-        gateways_str = "_None detected_"
-        gateway_emoji = "❌"
-    
-    # Status code emoji
-    status_emoji = "✅" if status_code == 200 else "⚠️"
-    
-    # Security indicators
-    captcha_status = "✅ *Yes*" if captcha else "❌ No"
-    cloudflare_status = "🛡️ *Protected*" if cloudflare else "❌ Not detected"
-    
+        status_display = f"⚪ {status_code}"
+
+    # Format gateways with count badge
+    if detected_gateways:
+        gateway_count = len(detected_gateways)
+        # Limit display to top 5 gateways for readability
+        if gateway_count > 5:
+            gateways_display = ", ".join(detected_gateways[:5])
+            gateways_str = f"*{gateways_display}* +{gateway_count - 5} more"
+        else:
+            gateways_str = f"*{', '.join(detected_gateways)}*"
+        gateway_line = f"✅ │ {gateways_str}"
+    else:
+        gateway_line = "❌ │ _None detected_"
+
+    # Security type formatting
+    security_lower = payment_security_type.lower()
+    if "3d" in security_lower or "secure" in security_lower:
+        security_icon = "🔐"
+        security_display = f"*{payment_security_type}*"
+    elif "otp" in security_lower:
+        security_icon = "📱"
+        security_display = f"*{payment_security_type}*"
+    elif "none" in security_lower or "no " in security_lower:
+        security_icon = "⚪"
+        security_display = f"_{payment_security_type}_"
+    else:
+        security_icon = "🔒"
+        security_display = f"_{payment_security_type}_"
+
+    # CVV/CVC formatting
+    cvv_lower = cvv_cvc_status.lower()
+    if "required" in cvv_lower:
+        cvv_icon = "✅"
+        cvv_display = f"*{cvv_cvc_status}*"
+    else:
+        cvv_icon = "⚪"
+        cvv_display = f"_{cvv_cvc_status}_"
+
+    # Inbuilt status formatting
+    inbuilt_lower = inbuilt_status.lower()
+    if "detected" in inbuilt_lower or "yes" in inbuilt_lower:
+        inbuilt_icon = "✅"
+        inbuilt_display = f"*Detected*"
+    else:
+        inbuilt_icon = "⚪"
+        inbuilt_display = f"_Not detected_"
+
+    # Cloudflare formatting
+    if cloudflare:
+        cf_display = "🛡️ *Protected*"
+    else:
+        cf_display = "⚪ _No_"
+
+    # Captcha formatting
+    if captcha:
+        captcha_display = "🤖 *Yes*"
+    else:
+        captcha_display = "⚪ _No_"
+
     return (
-        f"🌐 **URL:** `{url}`\n"
-        f"{status_emoji} **Status:** {status_code}\n\n"
-        
-        f"**💰 Payment Information**\n"
-        f"{gateway_emoji} Gateways: {gateways_str}\n"
-        f"🔐 Security: _{payment_security_type}_\n"
-        f"🔢 CVV/CVC: _{cvv_cvc_status}_\n"
-        f"💼 Inbuilt System: _{inbuilt_status}_\n\n"
-        
-        f"**🛡️ Security Features**\n"
-        f"🤖 Captcha: {captcha_status}\n"
-        f"☁️ Cloudflare: {cloudflare_status}\n"
-        "─────────────────\n"
+        f"┌──────────────────────────\n"
+        f"│ 🌐 `{display_url}`\n"
+        f"│ {status_display}\n"
+        f"├──────────────────────────\n"
+        f"│ 💳 *GATEWAYS*\n"
+        f"│ {gateway_line}\n"
+        f"├──────────────────────────\n"
+        f"│ 🔒 *SECURITY*\n"
+        f"│ {security_icon} │ Auth: {security_display}\n"
+        f"│ {cvv_icon} │ CVV/CVC: {cvv_display}\n"
+        f"│ {inbuilt_icon} │ Inbuilt: {inbuilt_display}\n"
+        f"├──────────────────────────\n"
+        f"│ 🛡️ *PROTECTION*\n"
+        f"│ ☁️ Cloudflare: {cf_display}\n"
+        f"│ 🤖 Captcha: {captcha_display}\n"
+        f"└──────────────────────────\n\n"
     )
 
