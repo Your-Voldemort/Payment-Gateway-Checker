@@ -1,11 +1,39 @@
 """Utility functions for URL validation and analysis."""
 import re
 import validators
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 from config import (
     PAYMENT_GATEWAYS, CAPTCHA_KEYWORDS, CLOUDFLARE_INDICATORS,
     SECURE_3D_KEYWORDS, OTP_KEYWORDS, INBUILT_PAYMENT_KEYWORDS
 )
+
+
+def escape_markdown(text: str) -> str:
+    """
+    Escape special Markdown characters to prevent Telegram parse errors.
+    
+    Telegram's Markdown parser is strict and will fail if special characters
+    like _, *, `, [, ] are not properly escaped or balanced.
+    
+    Args:
+        text: The text to escape
+        
+    Returns:
+        str: Text with Markdown special characters escaped
+    """
+    if not text:
+        return text
+    
+    # Characters that need escaping in Telegram Markdown
+    # Note: We escape _ and * which are most common issues
+    # We also escape ` [ ] ( ) which can cause parsing issues
+    escape_chars = ['_', '*', '`', '[', ']', '(', ')']
+    
+    result = text
+    for char in escape_chars:
+        result = result.replace(char, '\\' + char)
+    
+    return result
 
 
 def normalize_url(url: str) -> str:
@@ -152,7 +180,7 @@ def check_payment_info(response_text: str) -> str:
         return "No CVV or CVC Requirement Detected"
 
 
-def check_inbuilt_payment_system(response_text: str, inbuilt_keywords: List[str] = None) -> bool:
+def check_inbuilt_payment_system(response_text: str, inbuilt_keywords: Optional[List[str]] = None) -> bool:
     """
     Check if the site has an inbuilt payment system based on specific keywords.
     
@@ -200,8 +228,17 @@ def format_url_result(
     Returns:
         str: Formatted result string
     """
+    # Escape all dynamic content to prevent Markdown parsing errors
+    safe_url = escape_markdown(url)
+    safe_security_type = escape_markdown(payment_security_type)
+    safe_cvv_status = escape_markdown(cvv_cvc_status)
+    safe_inbuilt_status = escape_markdown(inbuilt_status)
+    
+    # Escape gateway names
+    safe_gateways = [escape_markdown(g) for g in detected_gateways]
+    
     # URL display (truncate if too long for readability)
-    display_url = url if len(url) <= 45 else url[:42] + "..."
+    display_url = safe_url if len(safe_url) <= 45 else safe_url[:42] + "..."
 
     # Status indicator with color coding
     if status_code == 200:
@@ -218,79 +255,78 @@ def format_url_result(
         status_display = f"⚪ {status_code}"
 
     # Format gateways with count badge
-    if detected_gateways:
-        gateway_count = len(detected_gateways)
+    if safe_gateways:
+        gateway_count = len(safe_gateways)
         # Limit display to top 5 gateways for readability
         if gateway_count > 5:
-            gateways_display = ", ".join(detected_gateways[:5])
-            gateways_str = f"*{gateways_display}* +{gateway_count - 5} more"
+            gateways_display = ", ".join(safe_gateways[:5])
+            gateways_str = f"{gateways_display} +{gateway_count - 5} more"
         else:
-            gateways_str = f"*{', '.join(detected_gateways)}*"
+            gateways_str = f"{', '.join(safe_gateways)}"
         gateway_line = f"✅ │ {gateways_str}"
     else:
-        gateway_line = "❌ │ _None detected_"
+        gateway_line = "❌ │ None detected"
 
     # Security type formatting
     security_lower = payment_security_type.lower()
     if "3d" in security_lower or "secure" in security_lower:
         security_icon = "🔐"
-        security_display = f"*{payment_security_type}*"
+        security_display = f"{safe_security_type}"
     elif "otp" in security_lower:
         security_icon = "📱"
-        security_display = f"*{payment_security_type}*"
+        security_display = f"{safe_security_type}"
     elif "none" in security_lower or "no " in security_lower:
         security_icon = "⚪"
-        security_display = f"_{payment_security_type}_"
+        security_display = f"{safe_security_type}"
     else:
         security_icon = "🔒"
-        security_display = f"_{payment_security_type}_"
+        security_display = f"{safe_security_type}"
 
     # CVV/CVC formatting
     cvv_lower = cvv_cvc_status.lower()
     if "required" in cvv_lower:
         cvv_icon = "✅"
-        cvv_display = f"*{cvv_cvc_status}*"
+        cvv_display = f"{safe_cvv_status}"
     else:
         cvv_icon = "⚪"
-        cvv_display = f"_{cvv_cvc_status}_"
+        cvv_display = f"{safe_cvv_status}"
 
     # Inbuilt status formatting
     inbuilt_lower = inbuilt_status.lower()
     if "detected" in inbuilt_lower or "yes" in inbuilt_lower:
         inbuilt_icon = "✅"
-        inbuilt_display = f"*Detected*"
+        inbuilt_display = "Detected"
     else:
         inbuilt_icon = "⚪"
-        inbuilt_display = f"_Not detected_"
+        inbuilt_display = "Not detected"
 
     # Cloudflare formatting
     if cloudflare:
-        cf_display = "🛡️ *Protected*"
+        cf_display = "🛡️ Protected"
     else:
-        cf_display = "⚪ _No_"
+        cf_display = "⚪ No"
 
     # Captcha formatting
     if captcha:
-        captcha_display = "🤖 *Yes*"
+        captcha_display = "🤖 Yes"
     else:
-        captcha_display = "⚪ _No_"
+        captcha_display = "⚪ No"
 
     return (
         f"┌──────────────────────────\n"
-        f"│ 🌐 `{display_url}`\n"
+        f"│ 🌐 {display_url}\n"
         f"│ {status_display}\n"
         f"├──────────────────────────\n"
-        f"│ 💳 *GATEWAYS*\n"
+        f"│ 💳 GATEWAYS\n"
         f"│ {gateway_line}\n"
         f"├──────────────────────────\n"
-        f"│ 🔒 *SECURITY*\n"
+        f"│ 🔒 SECURITY\n"
         f"│ {security_icon} │ Auth: {security_display}\n"
         f"│ {cvv_icon} │ CVV/CVC: {cvv_display}\n"
         f"│ {inbuilt_icon} │ Inbuilt: {inbuilt_display}\n"
         f"├──────────────────────────\n"
-        f"│ 🛡️ *PROTECTION*\n"
+        f"│ 🛡️ PROTECTION\n"
         f"│ ☁️ Cloudflare: {cf_display}\n"
         f"│ 🤖 Captcha: {captcha_display}\n"
         f"└──────────────────────────\n\n"
     )
-
