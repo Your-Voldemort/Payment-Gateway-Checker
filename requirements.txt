@@ -7,4 +7,4 @@ validators==0.22.0
 
 # Optional performance optimization (10-20x faster pattern matching)
 # Install separately: pip install pyahocorasick
-# pyahocorasick>=2.0.0
+pyahocorasick>=2.0.0
