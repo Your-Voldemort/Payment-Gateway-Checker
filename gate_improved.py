@@ -461,38 +461,26 @@ def handle_text(message):
         url_count = len(urls)
         header = (
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"✅ *ANALYSIS COMPLETE*\n"
+            f"✅ ANALYSIS COMPLETE\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📊 Scanned *{url_count}* URL{'s' if url_count > 1 else ''}\n\n"
+            f"📊 Scanned {url_count} URL{'s' if url_count > 1 else ''}\n\n"
         )
 
         footer = (
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"_Powered by_ @volde\\_is\\_back\n"
+            f"Powered by @volde_is_back\n"
             f"🤖 @UrlDebugger_bot"
         )
 
         response_message = header + "".join(results) + footer
 
         # Split message if too long (Telegram limit is 4096 characters)
-        # Use try/except to fallback to plain text if Markdown parsing fails
-        def send_with_fallback(text: str):
-            """Send message with Markdown, fallback to plain text on error."""
-            try:
-                bot.send_message(message.chat.id, text, parse_mode='Markdown')
-            except Exception as e:
-                if "can't parse entities" in str(e).lower():
-                    # Markdown parsing failed, send as plain text
-                    logger.warning(f"Markdown parse error, sending as plain text: {e}")
-                    bot.send_message(message.chat.id, text)
-                else:
-                    raise
-        
+        # Send as plain text to avoid Markdown parsing issues with dynamic content
         if len(response_message) > 4000:
             for i in range(0, len(response_message), 4000):
-                send_with_fallback(response_message[i:i+4000])
+                bot.send_message(message.chat.id, response_message[i:i+4000])
         else:
-            send_with_fallback(response_message)
+            bot.send_message(message.chat.id, response_message)
 
 
 @bot.message_handler(content_types=['photo', 'video', 'document', 'audio', 'voice', 'sticker'])
