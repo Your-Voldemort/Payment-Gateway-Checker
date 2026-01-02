@@ -516,7 +516,7 @@ def main():
             bot.polling(none_stop=True, interval=1, timeout=30)
             
         except KeyboardInterrupt:
-            logger.info("Bot stopped by user")
+            logger.info("Bot stopped by The Owner (KeyboardInterrupt). Exiting...")
             break
             
         except telebot.apihelper.ApiException as e:
