@@ -215,6 +215,9 @@ def format_url_result(
     """
     Format the URL check result into a readable message.
 
+    Uses a modern card-based design with rounded corners, chevron bullets,
+    and proper vertical spacing for improved readability.
+
     Args:
         url: The checked URL
         detected_gateways: List of detected payment gateways
@@ -229,7 +232,7 @@ def format_url_result(
         str: Formatted result string (plain text, no Markdown)
     """
     # URL display (truncate if too long for readability)
-    display_url = url if len(url) <= 45 else url[:42] + "..."
+    display_url = url if len(url) <= 24 else url[:21] + "..."
 
     # Status indicator with color coding
     if status_code == 200:
@@ -248,70 +251,82 @@ def format_url_result(
     # Format gateways with count badge
     if detected_gateways:
         gateway_count = len(detected_gateways)
-        # Limit display to top 5 gateways for readability
-        if gateway_count > 5:
-            gateways_display = ", ".join(detected_gateways[:5])
-            gateways_str = f"{gateways_display} +{gateway_count - 5} more"
+        # Limit display to top 3 gateways for readability in new design
+        if gateway_count > 3:
+            gateways_display = ", ".join(detected_gateways[:3])
+            gateways_str = f"✅ {gateways_display} +{gateway_count - 3} more"
         else:
-            gateways_str = f"{', '.join(detected_gateways)}"
-        gateway_line = f"✅ │ {gateways_str}"
+            gateways_str = f"✅ {', '.join(detected_gateways)}"
     else:
-        gateway_line = "❌ │ None detected"
+        gateways_str = "❌ None detected"
 
-    # Security type formatting
+    # Security type formatting - simplify display
     security_lower = payment_security_type.lower()
     if "3d" in security_lower or "secure" in security_lower:
-        security_icon = "🔐"
+        auth_display = "3D Secure"
     elif "otp" in security_lower:
-        security_icon = "📱"
+        auth_display = "OTP Required"
     elif "none" in security_lower or "no " in security_lower:
-        security_icon = "⚪"
+        auth_display = "None"
     else:
-        security_icon = "🔒"
+        auth_display = payment_security_type
 
-    # CVV/CVC formatting
+    # CVV/CVC formatting - simplify display
     cvv_lower = cvv_cvc_status.lower()
-    if "required" in cvv_lower:
-        cvv_icon = "✅"
+    if "both" in cvv_lower:
+        cvv_display = "CVV + CVC"
+    elif "cvv" in cvv_lower and "required" in cvv_lower:
+        cvv_display = "Required"
+    elif "cvc" in cvv_lower and "required" in cvv_lower:
+        cvv_display = "Required"
+    elif "no " in cvv_lower or "none" in cvv_lower:
+        cvv_display = "Not detected"
     else:
-        cvv_icon = "⚪"
+        cvv_display = cvv_cvc_status
 
     # Inbuilt status formatting
     inbuilt_lower = inbuilt_status.lower()
     if "detected" in inbuilt_lower or "yes" in inbuilt_lower:
-        inbuilt_icon = "✅"
         inbuilt_display = "Detected"
     else:
-        inbuilt_icon = "⚪"
         inbuilt_display = "Not detected"
 
     # Cloudflare formatting
     if cloudflare:
         cf_display = "🛡️ Protected"
     else:
-        cf_display = "⚪ No"
+        cf_display = "⚪ None"
 
     # Captcha formatting
     if captcha:
-        captcha_display = "🤖 Yes"
+        captcha_display = "🤖 Detected"
     else:
-        captcha_display = "⚪ No"
+        captcha_display = "⚪ None"
 
     return (
-        f"┌──────────────────────────\n"
-        f"│ 🌐 {display_url}\n"
-        f"│ {status_display}\n"
-        f"├──────────────────────────\n"
-        f"│ 💳 GATEWAYS\n"
-        f"│ {gateway_line}\n"
-        f"├──────────────────────────\n"
-        f"│ 🔒 SECURITY\n"
-        f"│ {security_icon} │ Auth: {payment_security_type}\n"
-        f"│ {cvv_icon} │ CVV/CVC: {cvv_cvc_status}\n"
-        f"│ {inbuilt_icon} │ Inbuilt: {inbuilt_display}\n"
-        f"├──────────────────────────\n"
-        f"│ 🛡️ PROTECTION\n"
-        f"│ ☁️ Cloudflare: {cf_display}\n"
-        f"│ 🤖 Captcha: {captcha_display}\n"
-        f"└──────────────────────────\n\n"
+        f"╭─ SCAN RESULT ─────────────╮\n"
+        f"│  🌐 {display_url}\n"
+        f"│  {status_display}\n"
+        f"╰───────────────────────────╯\n"
+        f"\n"
+        f"┌─ 💳 GATEWAYS ─────────────\n"
+        f"│\n"
+        f"│  {gateways_str}\n"
+        f"│\n"
+        f"└────────────────────────────\n"
+        f"\n"
+        f"┌─ 🔐 SECURITY ─────────────\n"
+        f"│\n"
+        f"│  Auth     ›  {auth_display}\n"
+        f"│  CVV/CVC  ›  {cvv_display}\n"
+        f"│  Inbuilt  ›  {inbuilt_display}\n"
+        f"│\n"
+        f"└────────────────────────────\n"
+        f"\n"
+        f"┌─ 🛡️ PROTECTION ───────────\n"
+        f"│\n"
+        f"│  Cloudflare  ›  {cf_display}\n"
+        f"│  Captcha     ›  {captcha_display}\n"
+        f"│\n"
+        f"└────────────────────────────\n\n"
     )

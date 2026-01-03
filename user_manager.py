@@ -252,3 +252,41 @@ def get_user_count() -> int:
         int: Number of registered users
     """
     return len(load_user_ids())
+
+
+def register_user(user_id: int) -> str:
+    """
+    Register a user and return the registration status.
+
+    Args:
+        user_id: The Telegram user ID to register
+
+    Returns:
+        str: Registration status - 'new', 'existing', or 'error'
+    """
+    try:
+        data = _load_users_data()
+
+        # Check if user already exists
+        if str(user_id) in data['users']:
+            logger.info(f"User ID {user_id} already registered")
+            return 'existing'
+
+        # Add new user with metadata
+        data['users'][str(user_id)] = {
+            "user_id": user_id,
+            "registered_at": datetime.now().isoformat(),
+            "migrated": False
+        }
+
+        # Write atomically
+        _atomic_write_json(JSON_FILE, data)
+
+        # Update cache immediately (avoid waiting for TTL expiration)
+        _user_cache.add_user(user_id)
+
+        logger.info(f"Registered new user ID: {user_id}")
+        return 'new'
+    except Exception as e:
+        logger.error(f"Error registering user ID {user_id}: {str(e)}")
+        return 'error'
