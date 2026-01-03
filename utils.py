@@ -248,15 +248,9 @@ def format_url_result(
     else:
         status_display = f"⚪ {status_code}"
 
-    # Format gateways with count badge
+    # Format gateways - show all detected gateways
     if detected_gateways:
-        gateway_count = len(detected_gateways)
-        # Limit display to top 3 gateways for readability in new design
-        if gateway_count > 3:
-            gateways_display = ", ".join(detected_gateways[:3])
-            gateways_str = f"✅ {gateways_display} +{gateway_count - 3} more"
-        else:
-            gateways_str = f"✅ {', '.join(detected_gateways)}"
+        gateways_str = f"✅ {', '.join(detected_gateways)}"
     else:
         gateways_str = "❌ None detected"
 
