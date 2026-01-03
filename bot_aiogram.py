@@ -760,20 +760,24 @@ async def main():
     # Include router
     dp.include_router(router)
 
-    try:
-        logger.info("Bot is now polling for updates...")
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-    finally:
-        # Graceful shutdown
+    # Set up graceful shutdown
+    async def on_shutdown():
+        """Handle graceful shutdown."""
         logger.info("Shutting down...")
         await close_http_client()
         await bot.session.close()
         logger.info("Shutdown complete.")
 
+    # Register shutdown callback
+    dp.shutdown.register(on_shutdown)
+
+    logger.info("Bot is now polling for updates...")
+    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except (KeyboardInterrupt, asyncio.CancelledError):
+    except (KeyboardInterrupt, asyncio.CancelledError, SystemExit):
         # Clean exit without traceback when Ctrl+C is pressed
         pass
