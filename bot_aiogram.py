@@ -802,19 +802,19 @@ async def cmd_url_check(message: Message, command: CommandObject):
             "╭───────────────────────────╮\n"
             "│   ✅  SCAN COMPLETE       │\n"
             f"│   {count_padded}│\n"
-            "╰───────────────────────────╯\n\n"
+            "╰───────────────────────────╯"
         )
 
+        # Send header first
+        await message.answer(header)
+
+        # Send each result as a separate message
         footer = get_footer()
-
-        response_message = header + "".join(results) + footer
-
-        # Split message if too long (Telegram limit is 4096 characters)
-        if len(response_message) > 4000:
-            for i in range(0, len(response_message), 4000):
-                await message.answer(response_message[i:i+4000])
-        else:
-            await message.answer(response_message)
+        for result in results:
+            # Combine result with footer
+            # result typically ends with newlines, so strip one set of newlines if needed
+            msg_text = result.rstrip() + footer
+            await message.answer(msg_text)
 
 
 async def process_urls_async(urls: List[str], user_id: int) -> List[str]:
