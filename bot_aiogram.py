@@ -10,6 +10,7 @@ Run with: python bot_aiogram.py
 import asyncio
 import logging
 from typing import List
+from datetime import datetime
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import Message
@@ -23,7 +24,10 @@ from aiogram.enums import ParseMode
 from config import Config
 from logger import setup_logger
 from gateway_checker import check_url
-from user_manager import load_user_ids, register_user, get_user_count, is_user_registered
+from user_manager import (
+    load_user_ids, register_user, get_user_count, is_user_registered,
+    check_subscription, add_subscription, get_subscription_expiry
+)
 from rate_limiter import RateLimiter
 from utils import format_url_result, normalize_url
 from http_client import get_http_session, close_http_client
@@ -357,6 +361,157 @@ async def cmd_stats(message: Message):
     await message.answer(stats_message)
 
 
+@router.message(Command("buy"))
+async def cmd_buy(message: Message):
+    """Handle /buy command showing subscription plans."""
+
+    # Plans section
+    plans_text = ""
+    for duration, details in Config.SUBSCRIPTION_PLANS.items():
+        plans_text += f"│  {duration.upper():<3} {details['name']:<10} ›  {details['price']}\n"
+
+    buy_message = (
+        "╭───────────────────────────╮\n"
+        "│   💎  PREMIUM ACCESS      │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        "Get unlimited access to the Gateway Hunter.\n"
+        "\n"
+        "┌─ SUBSCRIPTION PLANS ──────\n"
+        "│\n"
+        f"{plans_text}"
+        "│\n"
+        "└────────────────────────────\n"
+        "\n"
+        "┌─ PAYMENT METHODS ─────────\n"
+        "│\n"
+        "│  💰 BTC (Bitcoin)\n"
+        f"│  `{Config.BTC_ADDRESS}`\n"
+        "│\n"
+        "│  💰 LTC (Litecoin)\n"
+        f"│  `{Config.LTC_ADDRESS}`\n"
+        "│\n"
+        "│  💰 USDT (TRC20)\n"
+        f"│  `{Config.USDT_TRC20_ADDRESS}`\n"
+        "│\n"
+        "└────────────────────────────\n"
+        "\n"
+        "💡 To purchase:\n"
+        "1. Send payment to one of the addresses\n"
+        "2. Send screenshot to owner @volde_is_back\n"
+        "3. Wait for activation"
+        + get_footer()
+    )
+
+    await message.answer(buy_message, parse_mode=ParseMode.MARKDOWN)
+
+
+@router.message(Command("subscription"))
+async def cmd_subscription(message: Message):
+    """Check subscription status."""
+    user_id = message.from_user.id
+
+    if is_owner(user_id):
+        await message.answer(
+            "╭───────────────────────────╮\n"
+            "│   👑  OWNER ACCESS        │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "You have unlimited lifetime access.\n"
+            "You are the system administrator."
+            + get_footer()
+        )
+        return
+
+    expiry = get_subscription_expiry(user_id)
+
+    if expiry and expiry > datetime.now():
+        time_left = expiry - datetime.now()
+        days_left = time_left.days
+        hours_left = time_left.seconds // 3600
+
+        status_msg = (
+            "╭───────────────────────────╮\n"
+            "│   ✅  ACTIVE SUBSCRIPTION │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "┌─ STATUS ──────────────────\n"
+            "│\n"
+            f"│  Expires  ›  {expiry.strftime('%Y-%m-%d %H:%M')}\n"
+            f"│  Remaining›  {days_left}d {hours_left}h\n"
+            "│\n"
+            "└────────────────────────────"
+            + get_footer()
+        )
+    else:
+        status_msg = (
+            "╭───────────────────────────╮\n"
+            "│   ❌  NO SUBSCRIPTION     │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "You do not have an active plan.\n"
+            "\n"
+            "Use /buy to view plans and upgrade."
+            + get_footer()
+        )
+
+    await message.answer(status_msg)
+
+
+@router.message(Command("addsub"))
+async def cmd_addsub(message: Message):
+    """Add subscription to user (Owner only). Usage: /addsub <user_id> <duration>"""
+    if not is_owner(message.from_user.id):
+        return
+
+    try:
+        parts = message.text.split()
+        if len(parts) != 3:
+            await message.answer("Usage: /addsub <user_id> <duration>\nExample: /addsub 123456789 1m")
+            return
+
+        target_user_id = int(parts[1])
+        duration = parts[2]
+
+        new_expiry = add_subscription(target_user_id, duration)
+
+        if new_expiry:
+            await message.answer(
+                f"✅ Success!\n\n"
+                f"User: {target_user_id}\n"
+                f"Added: {duration}\n"
+                f"New Expiry: {new_expiry}"
+            )
+
+            # Optionally notify the user
+            try:
+                # We need the bot instance to send message to other user
+                # In aiogram 3 handlers, message.bot gives access to bot instance
+                await message.bot.send_message(
+                    target_user_id,
+                    "╭───────────────────────────╮\n"
+                    "│   🎉  PLAN ACTIVATED      │\n"
+                    "╰───────────────────────────╯\n"
+                    "\n"
+                    f"Your subscription has been extended!\n"
+                    f"Expires: {new_expiry}\n"
+                    "\n"
+                    "Thank you for your support! 💎"
+                    + get_footer()
+                )
+            except Exception as e:
+                await message.answer(f"Warning: Could not notify user (user might have blocked bot): {e}")
+
+        else:
+            await message.answer("❌ Failed to add subscription. Check logs.")
+
+    except ValueError:
+        await message.answer("Invalid format. User ID must be a number.")
+    except Exception as e:
+        await message.answer(f"Error: {str(e)}")
+
+
+
 @router.message(Command("cancel"))
 async def cmd_cancel(message: Message, state: FSMContext):
     """Cancel any ongoing operation."""
@@ -494,6 +649,24 @@ async def handle_text(message: Message):
             + get_footer()
         )
         await message.answer(not_registered_msg)
+        return
+
+    # Check subscription status
+    if not check_subscription(user_id):
+        payment_required_msg = (
+            "╭───────────────────────────╮\n"
+            "│   💳  SUBSCRIPTION NEEDED │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "You need an active subscription\n"
+            "to use the scanner.\n"
+            "\n"
+            "Use /buy to see plans and prices."
+            + get_footer()
+        )
+        await message.answer(payment_required_msg)
+        # Call the buy command handler logic to show plans immediately
+        await cmd_buy(message)
         return
 
     # Check rate limit

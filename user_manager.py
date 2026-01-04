@@ -4,7 +4,7 @@ import json
 import tempfile
 import time
 from typing import Set, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from config import Config
 from logger import setup_logger
 
@@ -228,7 +228,8 @@ def save_user_id(user_id: int) -> bool:
         data['users'][str(user_id)] = {
             "user_id": user_id,
             "registered_at": datetime.now().isoformat(),
-            "migrated": False
+            "migrated": False,
+            "subscription_expiry": None
         }
 
         # Write atomically
@@ -276,7 +277,8 @@ def register_user(user_id: int) -> str:
         data['users'][str(user_id)] = {
             "user_id": user_id,
             "registered_at": datetime.now().isoformat(),
-            "migrated": False
+            "migrated": False,
+            "subscription_expiry": None
         }
 
         # Write atomically
@@ -290,3 +292,126 @@ def register_user(user_id: int) -> str:
     except Exception as e:
         logger.error(f"Error registering user ID {user_id}: {str(e)}")
         return 'error'
+
+
+def get_subscription_expiry(user_id: int) -> Optional[datetime]:
+    """
+    Get the subscription expiry datetime for a user.
+
+    Args:
+        user_id: The Telegram user ID
+
+    Returns:
+        datetime object if active/future expiry, None if expired or no subscription
+    """
+    try:
+        # Load fresh data to ensure we have latest status
+        data = _load_users_data()
+        user_data = data['users'].get(str(user_id))
+
+        if not user_data:
+            return None
+
+        expiry_str = user_data.get('subscription_expiry')
+        if not expiry_str:
+            return None
+
+        expiry = datetime.fromisoformat(expiry_str)
+        return expiry
+    except Exception as e:
+        logger.error(f"Error getting subscription for {user_id}: {str(e)}")
+        return None
+
+
+def check_subscription(user_id: int) -> bool:
+    """
+    Check if a user has an active subscription.
+
+    Args:
+        user_id: The Telegram user ID
+
+    Returns:
+        bool: True if subscription is active or user is owner
+    """
+    # Owner always has access
+    if user_id == Config.OWNER_USER_ID:
+        return True
+
+    expiry = get_subscription_expiry(user_id)
+    if not expiry:
+        return False
+
+    return expiry > datetime.now()
+
+
+def add_subscription(user_id: int, duration_str: str) -> Optional[str]:
+    """
+    Add subscription time to a user.
+
+    Args:
+        user_id: The Telegram user ID
+        duration_str: Duration string (e.g. "1d", "1m", "1y")
+
+    Returns:
+        str: New expiry date string if successful, None otherwise
+    """
+    try:
+        data = _load_users_data()
+        str_id = str(user_id)
+
+        # Ensure user exists
+        if str_id not in data['users']:
+            # Auto-register if not exists
+            register_user(user_id)
+            # Reload data
+            data = _load_users_data()
+
+        current_expiry = None
+        user_data = data['users'][str_id]
+
+        if user_data.get('subscription_expiry'):
+            try:
+                current_expiry = datetime.fromisoformat(user_data['subscription_expiry'])
+                # If expired, start from now. If active, extend.
+                if current_expiry < datetime.now():
+                    current_expiry = datetime.now()
+            except ValueError:
+                current_expiry = datetime.now()
+        else:
+            current_expiry = datetime.now()
+
+        # Parse duration
+        duration_str = duration_str.lower()
+        delta = None
+
+        if duration_str.endswith('d'):
+            days = int(duration_str[:-1])
+            delta = timedelta(days=days)
+        elif duration_str.endswith('m'):
+            # Approximation: 30 days per month
+            months = int(duration_str[:-1])
+            delta = timedelta(days=months * 30)
+        elif duration_str.endswith('y'):
+            years = int(duration_str[:-1])
+            delta = timedelta(days=years * 365)
+        else:
+            # Fallback/Default
+            if duration_str.isdigit():
+                 delta = timedelta(days=int(duration_str))
+            else:
+                 logger.error(f"Invalid duration format: {duration_str}")
+                 return None
+
+        new_expiry = current_expiry + delta
+
+        # Update user data
+        data['users'][str_id]['subscription_expiry'] = new_expiry.isoformat()
+
+        # Write to disk
+        _atomic_write_json(JSON_FILE, data)
+
+        return new_expiry.strftime("%Y-%m-%d %H:%M:%S")
+
+    except Exception as e:
+        logger.error(f"Error adding subscription for {user_id}: {str(e)}")
+        return None

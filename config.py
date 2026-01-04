@@ -29,7 +29,20 @@ class Config:
     USER_AGENT_ROTATION = os.getenv('USER_AGENT_ROTATION', 'true').lower() == 'true'
     USER_AGENT_TYPE = os.getenv('USER_AGENT_TYPE', 'all')  # all, desktop, mobile, chrome, firefox, etc.
     DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    
+
+    # Subscription Settings
+    BTC_ADDRESS = os.getenv('BTC_ADDRESS', 'Your_BTC_Address_Here')
+    LTC_ADDRESS = os.getenv('LTC_ADDRESS', 'Your_LTC_Address_Here')
+    USDT_TRC20_ADDRESS = os.getenv('USDT_TRC20_ADDRESS', 'Your_USDT_TRC20_Address_Here')
+
+    SUBSCRIPTION_PLANS = {
+        "1d": {"name": "1 Day", "price": "$5"},
+        "1m": {"name": "1 Month", "price": "$20"},
+        "3m": {"name": "3 Months", "price": "$50"},
+        "6m": {"name": "6 Months", "price": "$90"},
+        "1y": {"name": "1 Year", "price": "$150"}
+    }
+
     @classmethod
     def validate(cls):
         """Validate required configuration."""
