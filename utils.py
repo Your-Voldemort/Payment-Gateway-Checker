@@ -232,7 +232,7 @@ def format_url_result(
         str: Formatted result string (plain text, no Markdown)
     """
     # URL display (truncate if too long for readability)
-    display_url = url if len(url) <= 24 else url[:21] + "..."
+    display_url = url if len(url) <= 50 else url[:47] + "..."
 
     # Status indicator with color coding
     if status_code == 200:

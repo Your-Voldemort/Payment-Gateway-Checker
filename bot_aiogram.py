@@ -839,7 +839,7 @@ async def process_urls_async(urls: List[str], user_id: int) -> List[str]:
             if isinstance(response, Exception):
                 logger.error(f"Error processing URL {url}: {str(response)}")
                 error_display = str(response)[:50] + "..." if len(str(response)) > 50 else str(response)
-                display_url = url[:24] + "..." if len(url) > 27 else url
+                display_url = url[:47] + "..." if len(url) > 50 else url
                 results.append(
                     "╭─ SCAN RESULT ─────────────╮\n"
                     f"│  🌐 {display_url}\n"
