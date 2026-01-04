@@ -14,7 +14,7 @@ from datetime import datetime
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import Message
-from aiogram.filters import Command, StateFilter
+from aiogram.filters import Command, StateFilter, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -122,7 +122,7 @@ async def cmd_start(message: Message):
         "┌─ QUICK START ─────────────\n"
         "│\n"
         "│  ›  /register  ─  Get access\n"
-        "│  ›  Send URL   ─  Any website\n"
+        "│  ›  /url <link>─  Scan website\n"
         "│  ›  Get Report ─  Instant results\n"
         "│\n"
         "└────────────────────────────\n"
@@ -200,13 +200,13 @@ async def cmd_help(message: Message):
         "\n"
         "┌─ URL FORMATS ─────────────\n"
         "│\n"
-        "│  ✓  example.com\n"
-        "│  ✓  www.example.com\n"
-        "│  ✓  https://example.com\n"
-        "│  ✓  https://shop.com/checkout\n"
+        "│  ✓  /url example.com\n"
+        "│  ✓  /url www.site.com\n"
+        "│  ✓  /url https://site.com\n"
+        "│  ✓  /url https://site.com/buy\n"
         "│\n"
-        "│  Send up to 10 URLs at once\n"
-        "│  (one per line)\n"
+        "│  Send multiple URLs separated\n"
+        "│  by spaces or newlines\n"
         "│\n"
         "└────────────────────────────\n"
         "\n"
@@ -254,11 +254,11 @@ async def cmd_register(message: Message):
             "\n"
             "┌─ HOW TO USE ──────────────\n"
             "│\n"
-            "│  Just send me any URL:\n"
+            "│  Use the /url command:\n"
             "│\n"
-            "│  ›  example.com\n"
-            "│  ›  https://shop.example.com\n"
-            "│  ›  Multiple URLs (one per line)\n"
+            "│  ›  /url example.com\n"
+            "│  ›  /url https://site.com\n"
+            "│  ›  Multiple URLs supported\n"
             "│\n"
             "└────────────────────────────\n"
             "\n"
@@ -284,11 +284,11 @@ async def cmd_register(message: Message):
             f"Hey {first_name}, you're all set! 👋\n"
             "\n"
             "Your account is active.\n"
-            "Just send any URL to start scanning.\n"
+            "Use /url <link> to start scanning.\n"
             "\n"
             "┌─ QUICK ACTIONS ───────────\n"
             "│\n"
-            "│  ›  Send a URL to scan\n"
+            "│  ›  /url <link> to scan\n"
             "│  ›  /help for full guide\n"
             "│\n"
             "└────────────────────────────"
@@ -626,10 +626,32 @@ async def handle_broadcast_message(message: Message, state: FSMContext, bot: Bot
 # URL PROCESSING HANDLER
 # =============================================================================
 
-@router.message(F.text, StateFilter(None))
-async def handle_text(message: Message):
-    """Handle text messages containing URLs."""
+@router.message(Command("url"))
+async def cmd_url_check(message: Message, command: CommandObject):
+    """Handle /url command to analyze URLs."""
     user_id = message.from_user.id
+
+    # Check for arguments
+    if not command.args:
+        usage_msg = (
+            "╭───────────────────────────╮\n"
+            "│   ℹ️  USAGE GUIDE         │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "Please provide URLs to scan.\n"
+            "\n"
+            "┌─ FORMAT ──────────────────\n"
+            "│\n"
+            "│  /url <link1> [link2] ...\n"
+            "│\n"
+            "│  Example:\n"
+            "│  /url example.com\n"
+            "│\n"
+            "└────────────────────────────"
+            + get_footer()
+        )
+        await message.answer(usage_msg)
+        return
 
     # Check if user is registered
     if not is_user_registered(user_id):
@@ -692,28 +714,13 @@ async def handle_text(message: Message):
         await message.answer(rate_limit_msg)
         return
 
-    # Process URLs - normalize and validate
-    raw_urls = [url.strip() for url in message.text.strip().splitlines() if url.strip()]
+    # Process URLs from command arguments - normalize and validate
+    # command.args contains the string after "/url "
+    # We split by whitespace to allow multiple URLs separated by space or newline
+    raw_urls = [url.strip() for url in command.args.split() if url.strip()]
 
     if not raw_urls:
-        no_urls_msg = (
-            "╭───────────────────────────╮\n"
-            "│   ❌  NO URLs FOUND       │\n"
-            "╰───────────────────────────╯\n"
-            "\n"
-            "Send me URLs to analyze.\n"
-            "\n"
-            "┌─ ACCEPTED FORMATS ───────\n"
-            "│\n"
-            "│  ✓  example.com\n"
-            "│  ✓  https://example.com\n"
-            "│  ✓  Multiple URLs\n"
-            "│     (one per line)\n"
-            "│\n"
-            "└────────────────────────────"
-            + get_footer()
-        )
-        await message.answer(no_urls_msg)
+        # Should be covered by initial check, but safety net
         return
 
     # Normalize URLs (add https:// if missing)
@@ -884,12 +891,12 @@ async def handle_media(message: Message):
         "│   ❌  TEXT ONLY           │\n"
         "╰───────────────────────────╯\n"
         "\n"
-        "I can only analyze text URLs.\n"
+        "Please use the /url command.\n"
         "\n"
-        "┌─ SEND URLs AS TEXT ──────\n"
+        "┌─ USE COMMAND ────────────\n"
         "│\n"
-        "│  ›  example.com\n"
-        "│  ›  https://example.com\n"
+        "│  ›  /url example.com\n"
+        "│  ›  /url https://site.com\n"
         "│\n"
         "└────────────────────────────"
         + get_footer()
