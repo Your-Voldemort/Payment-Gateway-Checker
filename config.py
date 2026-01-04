@@ -31,9 +31,9 @@ class Config:
     DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 
     # Subscription Settings
-    BTC_ADDRESS = os.getenv('BTC_ADDRESS', 'Your_BTC_Address_Here')
-    LTC_ADDRESS = os.getenv('LTC_ADDRESS', 'Your_LTC_Address_Here')
-    USDT_TRC20_ADDRESS = os.getenv('USDT_TRC20_ADDRESS', 'Your_USDT_TRC20_Address_Here')
+    BTC_ADDRESS = os.getenv('BTC_ADDRESS', 'bc1qw79l29y4yp2chmwmj3nw4my062a3aazjctx4q6')
+    LTC_ADDRESS = os.getenv('LTC_ADDRESS', 'ltc1q8sfrqzsahn7a0gcx6h5304ljf08k4vqvq04sau')
+    USDT_TRC20_ADDRESS = os.getenv('USDT_TRC20_ADDRESS', 'TJpx8Knpv6toy2QKqWdt64W2HxVt7q8gef')
 
     SUBSCRIPTION_PLANS = {
         "1d": {"name": "1 Day", "price": "$5"},

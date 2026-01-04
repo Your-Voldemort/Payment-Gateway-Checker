@@ -386,13 +386,13 @@ async def cmd_buy(message: Message):
         "┌─ PAYMENT METHODS ─────────\n"
         "│\n"
         "│  💰 BTC (Bitcoin)\n"
-        f"│  `{Config.BTC_ADDRESS}`\n"
+        f"│  <code>{Config.BTC_ADDRESS}</code>\n"
         "│\n"
         "│  💰 LTC (Litecoin)\n"
-        f"│  `{Config.LTC_ADDRESS}`\n"
+        f"│  <code>{Config.LTC_ADDRESS}</code>\n"
         "│\n"
         "│  💰 USDT (TRC20)\n"
-        f"│  `{Config.USDT_TRC20_ADDRESS}`\n"
+        f"│  <code>{Config.USDT_TRC20_ADDRESS}</code>\n"
         "│\n"
         "└────────────────────────────\n"
         "\n"
@@ -403,7 +403,7 @@ async def cmd_buy(message: Message):
         + get_footer()
     )
 
-    await message.answer(buy_message, parse_mode=ParseMode.MARKDOWN)
+    await message.answer(buy_message, parse_mode=ParseMode.HTML)
 
 
 @router.message(Command("subscription"))
