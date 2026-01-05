@@ -30,6 +30,18 @@ from config import Config
 
 logger = setup_logger()
 
+# Module-level lock - initialized once when module loads
+# This is safe because module loading is single-threaded
+_singleton_lock: Optional[asyncio.Lock] = None
+
+
+def _get_singleton_lock() -> asyncio.Lock:
+    """Get or create the singleton lock in a thread-safe manner."""
+    global _singleton_lock
+    if _singleton_lock is None:
+        _singleton_lock = asyncio.Lock()
+    return _singleton_lock
+
 
 class PersistentHTTPClient:
     """
@@ -46,7 +58,6 @@ class PersistentHTTPClient:
     """
 
     _instance: Optional['PersistentHTTPClient'] = None
-    _lock: asyncio.Lock = None
 
     def __init__(self):
         self._session: Optional[aiohttp.ClientSession] = None
@@ -58,12 +69,12 @@ class PersistentHTTPClient:
         """
         Get or create the singleton instance.
 
-        Thread-safe via asyncio lock.
+        Thread-safe via module-level asyncio lock that's created
+        on first access in a single-threaded context.
         """
-        if cls._lock is None:
-            cls._lock = asyncio.Lock()
+        lock = _get_singleton_lock()
 
-        async with cls._lock:
+        async with lock:
             if cls._instance is None:
                 cls._instance = cls()
                 await cls._instance._initialize()
