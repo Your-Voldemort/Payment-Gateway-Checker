@@ -45,3 +45,7 @@ test_url_normalization.py
 Claude.md
 OPTIMIZATION_PLAN.md
 AGENTS.md
+
+# Auto Claude data directory
+.auto-claude/
+.claude/

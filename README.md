@@ -1,218 +1,101 @@
-# 🤖 Telegram Gateway Hunter Bot
+# 🤖 Gateway Hunter - Advanced Payment Gateway Scanner
 
-A sophisticated Telegram bot for detecting payment gateways and security features on websites.
+Gateway Hunter is a sophisticated Telegram bot designed for security researchers and developers to analyze websites and identify payment processors, security configurations, and protection systems.
 
-## ✨ Features
+## 🌟 Key Features
 
-- 🔍 **Payment Gateway Detection** - Detects 50+ payment gateways
-- 🛡️ **Security Analysis** - Identifies Captcha, Cloudflare, 3D Secure, OTP
-- 💳 **CVV/CVC Detection** - Analyzes card verification requirements
-- 🏗️ **Inbuilt Payment System Detection** - Identifies custom payment solutions
-- 📊 **User Management** - Register users and track statistics
-- 🚦 **Rate Limiting** - Prevents spam and abuse
-- 📢 **Broadcast System** - Send messages to all users (owner only)
-- 📝 **Comprehensive Logging** - Detailed logs for debugging and monitoring
+- **Advanced Gateway Detection**: Identifies 400+ payment gateways (Stripe, PayPal, Braintree, Adyen, etc.).
+- **Security Analysis**: Detects 3D Secure (VbV/MSC), OTP requirements, and CVV/CVC status.
+- **Protection System Identification**: Recognizes Cloudflare, Captcha systems, and WAFs.
+- **Checkout Type Detection**: Identifies Hosted, Embedded, and Inbuilt payment systems.
+- **Performance Optimized**: Built with native async I/O (aiogram 3.x) and persistent connection pooling.
+- **Subscription System**: Built-in plan management with crypto payment integration.
+- **Atomic Storage**: Safe JSON-based user data storage with memory caching.
 
-## 🚀 Installation
+## 🚀 Getting Started
 
-### 1. Clone or Download the Project
+### Prerequisites
 
-```bash
-cd "d:\Stuff\Projecta\New folder"
-```
+- Python 3.9 or higher
+- Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
+- Owner User ID (from [@userinfobot](https://t.me/userinfobot))
 
-### 2. Create Virtual Environment
+### Installation
 
-```bash
-python -m venv tgbot
-```
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd "Gateway checker"
+   ```
 
-### 3. Activate Virtual Environment
+2. **Set up a virtual environment**:
+   ```bash
+   python -m venv venv
+   # Windows:
+   .\venv\Scripts\activate
+   # Linux/Mac:
+   source venv/bin/activate
+   ```
 
-**Windows:**
+3. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-```bash
-.\tgbot\Scripts\activate
-```
-
-**Linux/Mac:**
-
-```bash
-source tgbot/bin/activate
-```
-
-### 4. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 5. Configure Environment Variables
-
-1. Copy `.env.example` to `.env`:
-
-```bash
-copy .env.example .env
-```
-
-1. Edit `.env` and add your credentials:
-
-```env
-TELEGRAM_BOT_TOKEN=your_bot_token_here
-OWNER_USER_ID=your_telegram_user_id
-```
-
-**How to get your Bot Token:**
-
-1. Message [@BotFather](https://t.me/BotFather) on Telegram
-2. Send `/newbot` and follow the instructions
-3. Copy the API token provided
-
-**How to get your User ID:**
-
-1. Message [@userinfobot](https://t.me/userinfobot) on Telegram
-2. Copy the ID number
-
-## 🎯 Usage
+4. **Configure environment**:
+   Create a `.env` file in the root directory:
+   ```env
+   TELEGRAM_BOT_TOKEN=your_token_here
+   OWNER_USER_ID=your_id_here
+   REQUEST_TIMEOUT=15
+   MAX_URLS_PER_REQUEST=10
+   ENABLE_RATE_LIMITING=true
+   ```
 
 ### Running the Bot
 
-**Option 1: Using the improved version (Recommended)**
-
 ```bash
-python gate_improved.py
+python bot_aiogram.py
 ```
 
-**Option 2: Using the original version**
+## 🎯 Bot Commands
 
-```bash
-python gate.py
-```
+- `/start` - Welcome screen and quick start guide.
+- `/register` - Create your account and get access.
+- `/url <link>` - Scan one or more URLs (separated by space or newline).
+- `/buy` - View premium subscription plans and payment details.
+- `/subscription` - Check your current plan status and expiry.
+- `/help` - Comprehensive guide on commands and detection features.
+- `/cancel` - Abort current operation (like broadcast).
 
-### Bot Commands
-
-- `/start` - Start the bot and see welcome message
-- `/register` - Register to use the bot
-- `/help` - Display help information
-- `/stats` - View bot statistics (Owner only)
-- `/broadcast` - Send message to all users (Owner only)
-
-### Checking URLs
-
-1. Register with `/register`
-2. Send one or more URLs (each on a new line):
-
-```
-https://example.com/checkout
-https://store.example.com/payment
-```
-
-1. Receive detailed analysis including:
-   - Payment gateways detected
-   - Security features (Captcha, Cloudflare, 3D Secure, OTP)
-   - CVV/CVC requirements
-   - Inbuilt payment system status
-   - HTTP status code
+**Owner Commands:**
+- `/stats` - View real-time bot usage statistics.
+- `/broadcast` - Send a message to all registered users.
+- `/addsub <user_id> <duration>` - Grant subscription to a user (e.g., `/addsub 12345 1m`).
 
 ## 📁 Project Structure
 
-```
-.
-├── gate.py                 # Original bot implementation
-├── gate_improved.py        # Improved bot implementation (modular)
-├── config.py              # Configuration management
-├── logger.py              # Logging setup
-├── utils.py               # Utility functions
-├── gateway_checker.py     # URL checking logic
-├── user_manager.py        # User management
-├── rate_limiter.py        # Rate limiting
-├── requirements.txt       # Python dependencies
-├── .env.example           # Environment variables template
-└── README.md             # This file
-```
+| File | Description |
+| :--- | :--- |
+| `bot_aiogram.py` | Main entry point using modern aiogram 3.x framework. |
+| `gateway_checker.py`| Core async logic for fetching and analyzing URLs. |
+| `detection.py` | Advanced detection engine with multi-tier confidence scoring. |
+| `config.py` | Extensive library of gateway signatures and bot settings. |
+| `user_manager.py` | User persistence with atomic JSON writes and TTL caching. |
+| `utils.py` | UI formatting, URL normalization, and regex helpers. |
+| `http_client.py` | Shared aiohttp connection pool management. |
+| `rate_limiter.py` | Memory-based request throttling. |
 
-## 🔧 Configuration
+## ⚙️ Detection Methodology
 
-Edit `.env` to customize:
+The bot uses a tiered detection system to ensure accuracy:
+1. **High Confidence**: Identified via JavaScript SDK signatures and CDN-hosted libraries.
+2. **Medium Confidence**: Detected via HTML form actions, iframe sources, and data attributes.
+3. **Low Confidence**: Identified via keyword matching with strict word boundaries.
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `TELEGRAM_BOT_TOKEN` | Your bot token from BotFather | Required |
-| `OWNER_USER_ID` | Your Telegram user ID | Required |
-| `REQUEST_TIMEOUT` | HTTP request timeout (seconds) | 10 |
-| `MAX_URLS_PER_REQUEST` | Maximum URLs per message | 10 |
-| `ENABLE_RATE_LIMITING` | Enable/disable rate limiting | true |
-| `RATE_LIMIT_MESSAGES` | Messages allowed per window | 20 |
-| `RATE_LIMIT_WINDOW` | Rate limit window (seconds) | 60 |
+## 🛡️ Security
 
-## 🆚 Differences: Original vs Improved
+This tool is intended for legal security research and educational purposes only. Always ensure you have permission to scan the target websites.
 
-### Original (`gate.py`)
-
-- ❌ Hardcoded API token (security risk!)
-- ❌ No rate limiting
-- ❌ Limited error handling
-- ❌ No logging
-- ❌ Monolithic structure
-- ❌ User registration doesn't save users
-
-### Improved (`gate_improved.py`)
-
-- ✅ Environment variable configuration
-- ✅ Rate limiting to prevent spam
-- ✅ Comprehensive error handling
-- ✅ Detailed logging (console + file)
-- ✅ Modular architecture
-- ✅ Actual user registration
-- ✅ Statistics tracking
-- ✅ Help command
-- ✅ Better UX with processing messages
-- ✅ Message length handling for long results
-
-## 🛡️ Security Best Practices
-
-1. **Never commit `.env` file** - Add it to `.gitignore`
-2. **Keep your bot token secret** - Don't share it publicly
-3. **Regularly update dependencies** - Run `pip install -U -r requirements.txt`
-4. **Monitor logs** - Check `bot.log` for suspicious activity
-5. **Use rate limiting** - Enabled by default to prevent abuse
-
-## 📊 Monitoring
-
-Logs are written to:
-
-- **Console** - INFO level and above
-- **bot.log** - DEBUG level and above
-
-Monitor your bot:
-
-```bash
-# View recent logs
-tail -f bot.log
-
-# Search for errors
-grep "ERROR" bot.log
-```
-
-## 🐛 Troubleshooting
-
-**Bot doesn't start:**
-
-- Check if `.env` file exists and contains valid values
-- Verify bot token is correct
-- Ensure all dependencies are installed
-
-**URLs not checking:**
-
-- Verify user is registered (`/register`)
-- Check rate limits
-- Look for errors in `bot.log`
-
-**Broadcast not working:**
-
-- Ensure you're using the correct owner user ID
-- Verify users have registered
-
-## 🤝 Contributing
-
-Feel free to submit issues or pull requests to improve the bot!
+---
+Created by [@volde_is_back](https://t.me/volde_is_back)
