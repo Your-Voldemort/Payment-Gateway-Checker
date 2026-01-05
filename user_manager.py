@@ -78,6 +78,36 @@ class UserCache:
 _user_cache = UserCache(ttl_seconds=60)
 
 
+def _ensure_data_directory() -> None:
+    """
+    Ensure the data directory exists and is writable.
+    
+    Creates the directory if it doesn't exist.
+    
+    Raises:
+        IOError: If directory cannot be created or is not writable
+    """
+    dir_path = os.path.dirname(JSON_FILE) or '.'
+    
+    # Create directory if it doesn't exist
+    if not os.path.exists(dir_path):
+        try:
+            os.makedirs(dir_path, exist_ok=True)
+            logger.info(f"Created data directory: {dir_path}")
+        except OSError as e:
+            raise IOError(f"Failed to create data directory {dir_path}: {str(e)}")
+    
+    # Verify it's a directory
+    if not os.path.isdir(dir_path):
+        raise IOError(f"Path exists but is not a directory: {dir_path}")
+    
+    # Check write permissions
+    if not os.access(dir_path, os.W_OK):
+        raise IOError(f"No write permission for directory: {dir_path}")
+    
+    logger.debug(f"Data directory verified: {dir_path}")
+
+
 def _migrate_from_txt_to_json() -> None:
     """Migrate old user_ids.txt to JSON format if it exists."""
     if os.path.exists(Config.USER_IDS_FILE) and not os.path.exists(JSON_FILE):
@@ -116,21 +146,88 @@ def _migrate_from_txt_to_json() -> None:
 
 def _atomic_write_json(filepath: str, data: Dict[str, Any]) -> None:
     """
-    Write JSON data atomically using temporary file.
-    
+    Write JSON data atomically using temporary file with proper validation.
+
+    This function ensures:
+    1. Target directory exists and is writable
+    2. Data is valid JSON before writing
+    3. Temporary files are cleaned up on failure
+    4. Atomic rename prevents partial writes
+
     Args:
-        filepath: Target file path
-        data: Data to write
+        filepath: Target file path for the JSON data
+        data: Dictionary to serialize as JSON
+
+    Raises:
+        IOError: If directory doesn't exist, permissions denied, or write fails
+        TypeError: If data is not JSON-serializable
     """
     dir_path = os.path.dirname(filepath) or '.'
-    
-    # Write to temporary file first
-    with tempfile.NamedTemporaryFile(mode='w', dir=dir_path, delete=False, suffix='.tmp') as tmp_file:
-        json.dump(data, tmp_file, indent=2)
-        tmp_name = tmp_file.name
-    
-    # Atomic rename
-    os.replace(tmp_name, filepath)
+    tmp_name = None
+
+    # === VALIDATION PHASE ===
+
+    # Check directory exists
+    if not os.path.exists(dir_path):
+        raise IOError(
+            f"Directory does not exist: {dir_path}\n"
+            f"Please create the directory or check the file path: {filepath}"
+        )
+
+    # Check directory is actually a directory (not a file)
+    if not os.path.isdir(dir_path):
+        raise IOError(
+            f"Path exists but is not a directory: {dir_path}\n"
+            f"Cannot write to: {filepath}"
+        )
+
+    # Check write permissions
+    if not os.access(dir_path, os.W_OK):
+        raise IOError(
+            f"No write permission for directory: {dir_path}\n"
+            f"Please check file permissions for: {filepath}"
+        )
+
+    # Pre-validate JSON serialization (fail fast before creating temp file)
+    try:
+        json_str = json.dumps(data, indent=2)
+    except (TypeError, ValueError) as e:
+        raise TypeError(f"Data is not JSON-serializable: {str(e)}")
+
+    # === WRITE PHASE ===
+
+    try:
+        # Write to temporary file first
+        with tempfile.NamedTemporaryFile(
+            mode='w',
+            dir=dir_path,
+            delete=False,
+            suffix='.tmp',
+            encoding='utf-8'
+        ) as tmp_file:
+            tmp_file.write(json_str)
+            tmp_name = tmp_file.name
+
+        # Atomic rename (POSIX guarantees atomicity; Windows since Vista)
+        os.replace(tmp_name, filepath)
+        tmp_name = None  # Clear so finally block doesn't try to delete
+
+        logger.debug(f"Atomically wrote {len(json_str)} bytes to {filepath}")
+
+    except OSError as e:
+        raise IOError(f"Failed to write JSON file {filepath}: {str(e)}")
+
+    finally:
+        # === CLEANUP PHASE ===
+        # Remove temp file if it still exists (write succeeded but rename failed,
+        # or an exception occurred after temp file creation)
+        if tmp_name and os.path.exists(tmp_name):
+            try:
+                os.remove(tmp_name)
+                logger.warning(f"Cleaned up orphaned temp file: {tmp_name}")
+            except OSError as cleanup_error:
+                # Log but don't raise - we don't want cleanup failure to mask original error
+                logger.error(f"Failed to cleanup temp file {tmp_name}: {cleanup_error}")
 
 
 def _load_users_data() -> Dict[str, Any]:
@@ -140,22 +237,42 @@ def _load_users_data() -> Dict[str, Any]:
     Returns:
         Dictionary containing users data
     """
+    # Ensure data directory exists and is writable
+    _ensure_data_directory()
+    
     # Check for migration first
     _migrate_from_txt_to_json()
     
     if os.path.exists(JSON_FILE):
         try:
-            with open(JSON_FILE, 'r') as f:
+            with open(JSON_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             logger.info(f"Loaded users data from {JSON_FILE}")
             return data
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in {JSON_FILE}: {str(e)}")
+            # Backup corrupted file
+            backup_file = f"{JSON_FILE}.corrupted.{int(time.time())}"
+            try:
+                os.rename(JSON_FILE, backup_file)
+                logger.warning(f"Moved corrupted file to {backup_file}")
+            except OSError:
+                pass
+            # Return empty structure
+            return {"users": {}, "metadata": {"version": "1.0"}}
         except Exception as e:
             logger.error(f"Error loading JSON file: {str(e)}")
             # Return empty structure on error
             return {"users": {}, "metadata": {"version": "1.0"}}
     else:
         logger.info(f"JSON file not found, creating new: {JSON_FILE}")
-        return {"users": {}, "metadata": {"version": "1.0"}}
+        # Create initial file
+        initial_data = {"users": {}, "metadata": {"version": "1.0"}}
+        try:
+            _atomic_write_json(JSON_FILE, initial_data)
+        except Exception as e:
+            logger.error(f"Failed to create initial JSON file: {str(e)}")
+        return initial_data
 
 
 def _load_user_ids_from_disk() -> Set[int]:
