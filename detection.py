@@ -9,7 +9,7 @@ This module provides improved detection accuracy through:
 5. BeautifulSoup HTML parsing for structured element analysis (Part 3.2)
 """
 import re
-from typing import Dict, List, Tuple, NamedTuple, Optional
+from typing import Dict, List, Tuple, NamedTuple, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
 from logger import setup_logger
@@ -749,7 +749,7 @@ SECURITY_HEADERS = {
 }
 
 
-def analyze_response_headers(headers: dict) -> Dict[str, any]:
+def analyze_response_headers(headers: Dict[str, str]) -> Dict[str, Any]:
     """
     Analyze HTTP response headers for payment providers and security features.
 
@@ -877,9 +877,9 @@ def is_cloudflare_protected(headers: dict, html: str = None) -> bool:
 
 def analyze_url_response(
     html: str,
-    headers: dict,
+    headers: Dict[str, str],
     status_code: int
-) -> Dict[str, any]:
+) -> Dict[str, Any]:
     """
     Perform comprehensive analysis of a URL response.
 
@@ -892,12 +892,21 @@ def analyze_url_response(
     6. Inbuilt payment system detection
 
     Args:
-        html: Response HTML content
-        headers: Response headers
-        status_code: HTTP status code
+        html: Raw HTML content of the page
+        headers: HTTP response headers as a dictionary
+        status_code: HTTP status code (e.g., 200, 404)
 
     Returns:
-        Comprehensive analysis dictionary
+        Dictionary containing:
+            - gateways: List[str] - All detected payment gateways
+            - high_confidence_gateways: List[str] - Gateways with >50% confidence
+            - detailed_matches: Dict[str, GatewayMatch] - Full match details
+            - captcha: bool - Whether CAPTCHA was detected
+            - cloudflare: bool - Whether Cloudflare protection was detected
+            - security_type: str - Security feature description
+            - cvv_status: str - CVV/CVC requirement status
+            - inbuilt_status: str - Built-in payment system status
+            - header_analysis: dict - HTTP header security analysis
     """
     # Gateway detection using regex patterns
     gateway_names, gateway_matches = find_payment_gateways_optimized(html)
