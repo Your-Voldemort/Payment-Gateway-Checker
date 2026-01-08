@@ -13,7 +13,7 @@ from typing import List
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command, StateFilter, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -59,6 +59,11 @@ class BroadcastState(StatesGroup):
     waiting_for_message = State()
 
 
+class ScanState(StatesGroup):
+    """States for URL scanning flow."""
+    waiting_for_url = State()
+
+
 # =============================================================================
 # UI COMPONENTS - Reusable message building blocks
 # =============================================================================
@@ -79,13 +84,55 @@ def is_owner(user_id: int) -> bool:
     return user_id == Config.OWNER_USER_ID
 
 
+def get_main_menu_keyboard() -> InlineKeyboardMarkup:
+    """Get the main menu inline keyboard."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔍 Scan Website", callback_data="scan_url"),
+            InlineKeyboardButton(text="💎 Subscribe", callback_data="subscription")
+        ],
+        [
+            InlineKeyboardButton(text="📖 Help", callback_data="help"),
+            InlineKeyboardButton(text="ℹ️ About", callback_data="about")
+        ]
+    ])
+    return keyboard
+
+
+def get_owner_menu_keyboard() -> InlineKeyboardMarkup:
+    """Get owner menu with additional admin options."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔍 Scan Website", callback_data="scan_url"),
+            InlineKeyboardButton(text="💎 Subscribe", callback_data="subscription")
+        ],
+        [
+            InlineKeyboardButton(text="📊 Statistics", callback_data="stats"),
+            InlineKeyboardButton(text="📢 Broadcast", callback_data="broadcast_start")
+        ],
+        [
+            InlineKeyboardButton(text="📖 Help", callback_data="help"),
+            InlineKeyboardButton(text="ℹ️ About", callback_data="about")
+        ]
+    ])
+    return keyboard
+
+
+def get_back_to_menu_keyboard() -> InlineKeyboardMarkup:
+    """Get back to menu button."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Back to Menu", callback_data="back_main")]
+    ])
+    return keyboard
+
+
 # =============================================================================
 # COMMAND HANDLERS
 # =============================================================================
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):
-    """Handle /start command."""
+    """Handle /start command with interactive menu."""
     user_id = message.from_user.id
     first_name = message.from_user.first_name or "User"
 
@@ -119,19 +166,14 @@ async def cmd_start(message: Message):
         "│\n"
         "└────────────────────────────\n"
         "\n"
-        "┌─ QUICK START ─────────────\n"
-        "│\n"
-        "│  ›  /register  ─  Get access\n"
-        "│  ›  /url <link>─  Scan website\n"
-        "│  ›  Get Report ─  Instant results\n"
-        "│\n"
-        "└────────────────────────────\n"
-        "\n"
-        "💡 Type /help for the full guide"
+        "💡 Choose an action below:"
         + get_footer()
     )
 
-    await message.answer(welcome_message)
+    # Choose keyboard based on user role
+    keyboard = get_owner_menu_keyboard() if is_owner(user_id) else get_main_menu_keyboard()
+
+    await message.answer(welcome_message, reply_markup=keyboard)
 
 
 @router.message(Command("help"))
@@ -620,6 +662,680 @@ async def handle_broadcast_message(message: Message, state: FSMContext, bot: Bot
     )
 
     await message.answer(result_message)
+
+
+# =============================================================================
+# CALLBACK QUERY HANDLERS - Interactive Buttons
+# =============================================================================
+
+@router.callback_query(F.data == "back_main")
+async def callback_back_main(callback: CallbackQuery):
+    """Handle back to main menu button."""
+    await callback.answer()
+
+    user_id = callback.from_user.id
+    first_name = callback.from_user.first_name or "User"
+
+    welcome_message = (
+        "╭───────────────────────────╮\n"
+        "│   🎯  GATEWAY HUNTER      │\n"
+        "│   Payment Gateway Scanner │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        f"Hey {first_name}! 👋\n"
+        "\n"
+        "💡 Choose an action below:"
+        + get_footer()
+    )
+
+    keyboard = get_owner_menu_keyboard() if is_owner(user_id) else get_main_menu_keyboard()
+
+    await callback.message.edit_text(welcome_message, reply_markup=keyboard)
+
+
+@router.callback_query(F.data == "scan_url")
+async def callback_scan_url(callback: CallbackQuery, state: FSMContext):
+    """Handle scan URL button press."""
+    await callback.answer()
+
+    user_id = callback.from_user.id
+
+    # Check if user is registered
+    if not is_user_registered(user_id):
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Register Now", callback_data="register")],
+            [InlineKeyboardButton(text="⬅️ Back", callback_data="back_main")]
+        ])
+
+        await callback.message.edit_text(
+            "╭───────────────────────────╮\n"
+            "│   ⚠️  ACCESS REQUIRED     │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "You need to register first!\n"
+            "\n"
+            "Click 'Register Now' to get access."
+            + get_footer(),
+            reply_markup=keyboard
+        )
+        return
+
+    # Check subscription
+    if not check_subscription(user_id):
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💎 View Plans", callback_data="subscription")],
+            [InlineKeyboardButton(text="⬅️ Back", callback_data="back_main")]
+        ])
+
+        await callback.message.edit_text(
+            "╭───────────────────────────╮\n"
+            "│   💳  SUBSCRIPTION NEEDED │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "You need an active subscription\n"
+            "to use the scanner.\n"
+            "\n"
+            "Click 'View Plans' to see options."
+            + get_footer(),
+            reply_markup=keyboard
+        )
+        return
+
+    # Prompt for URL
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Cancel", callback_data="back_main")]
+    ])
+
+    await callback.message.edit_text(
+        "🔍 **URL SCANNER**\n"
+        "───────────────────\n\n"
+        "📥 Send me the URL to scan\n\n"
+        "**Examples:**\n"
+        "• `example.com`\n"
+        "• `https://site.com/checkout`\n"
+        "• Multiple URLs (space-separated)\n\n"
+        "💡 Use /url command for direct scanning",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+
+    await state.set_state(ScanState.waiting_for_url)
+
+
+@router.message(ScanState.waiting_for_url, F.text)
+async def handle_scan_url_input(message: Message, state: FSMContext):
+    """Handle URL input during scan flow."""
+    await state.clear()
+
+    user_id = message.from_user.id
+
+    # Parse URLs from message
+    raw_urls = [url.strip() for url in message.text.split() if url.strip()]
+
+    if not raw_urls:
+        await message.answer("❌ No valid URLs provided. Use /start to try again.")
+        return
+
+    # Normalize URLs
+    urls = [normalize_url(url) for url in raw_urls]
+
+    if len(urls) > Config.MAX_URLS_PER_REQUEST:
+        await message.answer(
+            f"❌ Too many URLs!\n\n"
+            f"Limit: {Config.MAX_URLS_PER_REQUEST} URLs\n"
+            f"Sent: {len(urls)} URLs\n\n"
+            "Please split into smaller batches."
+            + get_footer()
+        )
+        return
+
+    # Process URLs (reuse existing logic)
+    url_word = "URL" if len(urls) == 1 else "URLs"
+    processing_msg = await message.answer(
+        "╭───────────────────────────╮\n"
+        "│   ⏳  SCANNING            │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        f"Analyzing {len(urls)} {url_word}..."
+    )
+
+    try:
+        results = await process_urls_async(urls, user_id)
+    except Exception as e:
+        logger.error(f"Error in async processing: {str(e)}")
+        results = [f"❌ Error: {str(e)[:100]}"]
+
+    try:
+        await processing_msg.delete()
+    except:
+        pass
+
+    # Send results with action buttons
+    for i, result in enumerate(results):
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🔄 Rescan", callback_data=f"rescan_{i}"),
+                InlineKeyboardButton(text="🏠 Menu", callback_data="back_main")
+            ]
+        ])
+        await message.answer(result + get_footer(), reply_markup=keyboard)
+
+
+@router.callback_query(F.data == "register")
+async def callback_register(callback: CallbackQuery):
+    """Handle register button press."""
+    await callback.answer()
+
+    user_id = callback.from_user.id
+    first_name = callback.from_user.first_name or "User"
+
+    status = register_user(user_id)
+
+    if status == 'new':
+        logger.info(f"User {user_id} registered via button")
+        keyboard = get_main_menu_keyboard()
+
+        await callback.message.edit_text(
+            "╭───────────────────────────╮\n"
+            "│   ✅  ACCESS GRANTED      │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            f"Welcome aboard, {first_name}! 🎉\n"
+            "\n"
+            "You now have full access to\n"
+            "Gateway Hunter.\n"
+            "\n"
+            "🚀 Click 'Scan Website' to begin!"
+            + get_footer(),
+            reply_markup=keyboard
+        )
+    else:
+        keyboard = get_main_menu_keyboard()
+        await callback.message.edit_text(
+            "╭───────────────────────────╮\n"
+            "│   ℹ️  ALREADY REGISTERED  │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            f"Hey {first_name}, you're all set! 👋\n"
+            "\n"
+            "Your account is active."
+            + get_footer(),
+            reply_markup=keyboard
+        )
+
+
+@router.callback_query(F.data == "subscription")
+async def callback_subscription(callback: CallbackQuery):
+    """Show subscription plans with inline buttons."""
+    await callback.answer()
+
+    user_id = callback.from_user.id
+
+    # Check if owner
+    if is_owner(user_id):
+        keyboard = get_back_to_menu_keyboard()
+        await callback.message.edit_text(
+            "╭───────────────────────────╮\n"
+            "│   👑  OWNER ACCESS        │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "You have unlimited lifetime access.\n"
+            "You are the system administrator."
+            + get_footer(),
+            reply_markup=keyboard
+        )
+        return
+
+    # Check current subscription
+    expiry = get_subscription_expiry(user_id)
+
+    if expiry and expiry > datetime.now():
+        time_left = expiry - datetime.now()
+        days_left = time_left.days
+        hours_left = time_left.seconds // 3600
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏱️ Extend Plan", callback_data="subscription_plans")],
+            [InlineKeyboardButton(text="⬅️ Back", callback_data="back_main")]
+        ])
+
+        await callback.message.edit_text(
+            "╭───────────────────────────╮\n"
+            "│   ✅  ACTIVE SUBSCRIPTION │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "┌─ STATUS ──────────────────\n"
+            "│\n"
+            f"│  Expires  ›  {expiry.strftime('%Y-%m-%d %H:%M')}\n"
+            f"│  Remaining›  {days_left}d {hours_left}h\n"
+            "│\n"
+            "└────────────────────────────"
+            + get_footer(),
+            reply_markup=keyboard
+        )
+    else:
+        # Show plans
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="1 Month - $20", callback_data="plan_1m"),
+                InlineKeyboardButton(text="3 Months - $50", callback_data="plan_3m")
+            ],
+            [
+                InlineKeyboardButton(text="6 Months - $90", callback_data="plan_6m"),
+                InlineKeyboardButton(text="1 Year - $150 🔥", callback_data="plan_1y")
+            ],
+            [InlineKeyboardButton(text="💳 Payment Info", callback_data="payment_info")],
+            [InlineKeyboardButton(text="⬅️ Back", callback_data="back_main")]
+        ])
+
+        await callback.message.edit_text(
+            "╭───────────────────────────╮\n"
+            "│   💎  PREMIUM ACCESS      │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "Get unlimited access to\n"
+            "Gateway Hunter!\n"
+            "\n"
+            "┌─ FEATURES ────────────────\n"
+            "│\n"
+            "│  ✓  400+ Payment Gateways\n"
+            "│  ✓  Unlimited Scans\n"
+            "│  ✓  Security Detection\n"
+            "│  ✓  Priority Support\n"
+            "│\n"
+            "└────────────────────────────\n"
+            "\n"
+            "💡 Select a plan below:"
+            + get_footer(),
+            reply_markup=keyboard
+        )
+
+
+@router.callback_query(F.data.startswith("plan_"))
+async def callback_plan_select(callback: CallbackQuery):
+    """Show payment options for selected plan."""
+    await callback.answer()
+
+    plan_id = callback.data.split("_")[1]
+    plan_info = Config.SUBSCRIPTION_PLANS.get(plan_id)
+
+    if not plan_info:
+        await callback.answer("❌ Invalid plan", show_alert=True)
+        return
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="₿ Bitcoin (BTC)", callback_data=f"pay_btc_{plan_id}")],
+        [InlineKeyboardButton(text="🪙 Litecoin (LTC)", callback_data=f"pay_ltc_{plan_id}")],
+        [InlineKeyboardButton(text="💵 USDT (TRC20)", callback_data=f"pay_usdt_{plan_id}")],
+        [InlineKeyboardButton(text="⬅️ Back to Plans", callback_data="subscription")]
+    ])
+
+    await callback.message.edit_text(
+        f"💎 **{plan_info['name']} Plan**\n"
+        f"Price: **{plan_info['price']}**\n"
+        "───────────────────────\n\n"
+        "Choose your payment method:",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+
+
+@router.callback_query(F.data.startswith("pay_"))
+async def callback_payment_method(callback: CallbackQuery):
+    """Show payment address for selected method."""
+    await callback.answer()
+
+    parts = callback.data.split("_")
+    crypto = parts[1]  # btc, ltc, usdt
+    plan_id = parts[2]  # 1m, 3m, etc.
+
+    plan_info = Config.SUBSCRIPTION_PLANS.get(plan_id)
+
+    # Get crypto address
+    addresses = {
+        "btc": ("Bitcoin (BTC)", Config.BTC_ADDRESS),
+        "ltc": ("Litecoin (LTC)", Config.LTC_ADDRESS),
+        "usdt": ("USDT TRC20", Config.USDT_TRC20_ADDRESS)
+    }
+
+    crypto_name, address = addresses.get(crypto, ("Unknown", "N/A"))
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Payment Sent", url="https://t.me/volde_is_back")],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data=f"plan_{plan_id}")]
+    ])
+
+    await callback.message.edit_text(
+        f"💎 **{plan_info['name']} - {plan_info['price']}**\n"
+        f"Payment: **{crypto_name}**\n"
+        "───────────────────────\n\n"
+        "📋 **Payment Address:**\n"
+        f"`{address}`\n\n"
+        "**Next Steps:**\n"
+        "1️⃣ Send payment to address above\n"
+        "2️⃣ Take screenshot of transaction\n"
+        "3️⃣ Click 'Payment Sent' to contact owner\n"
+        "4️⃣ Wait for activation (usually <1 hour)\n\n"
+        "💡 Tap address to copy",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+
+
+@router.callback_query(F.data == "payment_info")
+async def callback_payment_info(callback: CallbackQuery):
+    """Show all payment addresses."""
+    await callback.answer()
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Back to Plans", callback_data="subscription")]
+    ])
+
+    await callback.message.edit_text(
+        "╭───────────────────────────╮\n"
+        "│   💳  PAYMENT METHODS     │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        "**Bitcoin (BTC)**\n"
+        f"`{Config.BTC_ADDRESS}`\n\n"
+        "**Litecoin (LTC)**\n"
+        f"`{Config.LTC_ADDRESS}`\n\n"
+        "**USDT (TRC20)**\n"
+        f"`{Config.USDT_TRC20_ADDRESS}`\n\n"
+        "💡 Tap to copy address\n"
+        "\n"
+        "After payment, contact:\n"
+        "👤 @volde_is_back"
+        + get_footer(),
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+
+
+@router.callback_query(F.data == "help")
+async def callback_help(callback: CallbackQuery):
+    """Show help menu with categories."""
+    await callback.answer()
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚀 Getting Started", callback_data="help_start")],
+        [InlineKeyboardButton(text="🔍 How to Scan", callback_data="help_scan")],
+        [InlineKeyboardButton(text="💳 Payment Gateways", callback_data="help_gateways")],
+        [InlineKeyboardButton(text="🔐 Security Features", callback_data="help_security")],
+        [InlineKeyboardButton(text="💬 Contact Support", url="https://t.me/volde_is_back")],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="back_main")]
+    ])
+
+    await callback.message.edit_text(
+        "╭───────────────────────────╮\n"
+        "│   📖  HELP CENTER         │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        "Choose a topic to learn more:\n"
+        "\n"
+        "💡 You can also use these commands:\n"
+        "• /help - Full text guide\n"
+        "• /url <link> - Quick scan"
+        + get_footer(),
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data == "help_start")
+async def callback_help_start(callback: CallbackQuery):
+    """Show getting started help."""
+    await callback.answer()
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Back to Help", callback_data="help")]
+    ])
+
+    await callback.message.edit_text(
+        "╭───────────────────────────╮\n"
+        "│   🚀  GETTING STARTED     │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        "**Step 1:** Register\n"
+        "Use /register command or click\n"
+        "'Register Now' button\n"
+        "\n"
+        "**Step 2:** Subscribe\n"
+        "Choose a plan with /buy or\n"
+        "click 'Subscribe' button\n"
+        "\n"
+        "**Step 3:** Start Scanning\n"
+        "Use /url <link> or click\n"
+        "'Scan Website' button\n"
+        "\n"
+        "**Step 4:** Get Results\n"
+        "Instant analysis of payment\n"
+        "gateways and security!"
+        + get_footer(),
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+
+
+@router.callback_query(F.data == "help_scan")
+async def callback_help_scan(callback: CallbackQuery):
+    """Show scanning help."""
+    await callback.answer()
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Back to Help", callback_data="help")]
+    ])
+
+    await callback.message.edit_text(
+        "╭───────────────────────────╮\n"
+        "│   🔍  HOW TO SCAN         │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        "**URL Formats:**\n"
+        "✓ example.com\n"
+        "✓ www.site.com\n"
+        "✓ https://site.com\n"
+        "✓ https://site.com/checkout\n"
+        "\n"
+        "**Multiple URLs:**\n"
+        "/url site1.com site2.com\n"
+        "\n"
+        "**Pro Tips:**\n"
+        "• Target checkout pages\n"
+        "• No protocol needed\n"
+        f"• Max {Config.MAX_URLS_PER_REQUEST} URLs per scan\n"
+        "\n"
+        "**What We Detect:**\n"
+        "💳 400+ Payment Gateways\n"
+        "🔐 Security Features\n"
+        "🛡️ Protection Systems"
+        + get_footer(),
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+
+
+@router.callback_query(F.data == "help_gateways")
+async def callback_help_gateways(callback: CallbackQuery):
+    """Show payment gateways info."""
+    await callback.answer()
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Back to Help", callback_data="help")]
+    ])
+
+    await callback.message.edit_text(
+        "╭───────────────────────────╮\n"
+        "│   💳  PAYMENT GATEWAYS    │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        "**Detection Database:**\n"
+        "🌍 400+ Gateway Signatures\n"
+        "\n"
+        "**Categories:**\n"
+        "• Global Major (Stripe, PayPal)\n"
+        "• European (Mollie, Klarna)\n"
+        "• Asia-Pacific (Razorpay, Alipay)\n"
+        "• Middle East & Africa\n"
+        "• Latin America\n"
+        "• Cryptocurrency (BitPay, Coinbase)\n"
+        "• Buy Now Pay Later (Afterpay)\n"
+        "\n"
+        "**Confidence Levels:**\n"
+        "🟢 High - SDK/API detected\n"
+        "🟡 Medium - Form/iframe found\n"
+        "🔵 Low - Keyword match"
+        + get_footer(),
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+
+
+@router.callback_query(F.data == "help_security")
+async def callback_help_security(callback: CallbackQuery):
+    """Show security features info."""
+    await callback.answer()
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Back to Help", callback_data="help")]
+    ])
+
+    await callback.message.edit_text(
+        "╭───────────────────────────╮\n"
+        "│   🔐  SECURITY DETECTION  │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        "**What We Check:**\n"
+        "\n"
+        "🔐 **3D Secure**\n"
+        "Verified by Visa (VbV)\n"
+        "Mastercard SecureCode (MSC)\n"
+        "\n"
+        "📱 **OTP Verification**\n"
+        "SMS/Email verification\n"
+        "\n"
+        "🔢 **CVV/CVC Requirements**\n"
+        "Card security code checks\n"
+        "\n"
+        "🛡️ **Protection Systems**\n"
+        "• Cloudflare\n"
+        "• Captcha (reCAPTCHA, hCaptcha)\n"
+        "• WAF (Web Application Firewall)\n"
+        "\n"
+        "📦 **Checkout Types**\n"
+        "Hosted, Embedded, or Inbuilt"
+        + get_footer(),
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+
+
+@router.callback_query(F.data == "about")
+async def callback_about(callback: CallbackQuery):
+    """Show about information."""
+    await callback.answer()
+
+    keyboard = get_back_to_menu_keyboard()
+
+    await callback.message.edit_text(
+        "╭───────────────────────────╮\n"
+        "│   ℹ️  ABOUT               │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        "**Gateway Hunter**\n"
+        "Payment Gateway Scanner Bot\n"
+        "\n"
+        "**Version:** 2.0\n"
+        "**Framework:** aiogram 3.x\n"
+        "**Database:** 400+ Gateways\n"
+        "\n"
+        "**Features:**\n"
+        "✓ Multi-tier detection\n"
+        "✓ Security analysis\n"
+        "✓ Cloudflare detection\n"
+        "✓ Batch processing\n"
+        "✓ Real-time results\n"
+        "\n"
+        "**Creator:** @volde_is_back\n"
+        "**Bot:** @UrlDebugger_bot\n"
+        "\n"
+        "🌟 Built with ❤️ for security researchers"
+        + get_footer(),
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+
+
+@router.callback_query(F.data == "stats")
+async def callback_stats(callback: CallbackQuery):
+    """Show bot statistics (owner only)."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⚠️ Owner only!", show_alert=True)
+        return
+
+    await callback.answer()
+
+    user_count = get_user_count()
+    rate_status = "✅ Enabled" if Config.ENABLE_RATE_LIMITING else "❌ Disabled"
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📢 Broadcast", callback_data="broadcast_start")],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="back_main")]
+    ])
+
+    await callback.message.edit_text(
+        "╭───────────────────────────╮\n"
+        "│   📊  BOT STATISTICS      │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        "┌─ USER BASE ───────────────\n"
+        "│\n"
+        f"│  Total Users  ›  {user_count}\n"
+        "│\n"
+        "└────────────────────────────\n"
+        "\n"
+        "┌─ CONFIGURATION ───────────\n"
+        "│\n"
+        "│  Bot        ›  @UrlDebugger_bot\n"
+        f"│  Rate Limit ›  {rate_status}\n"
+        f"│  Max URLs   ›  {Config.MAX_URLS_PER_REQUEST}/request\n"
+        "│\n"
+        "└────────────────────────────\n"
+        "\n"
+        "✨ System running smoothly"
+        + get_footer(),
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data == "broadcast_start")
+async def callback_broadcast_start(callback: CallbackQuery, state: FSMContext):
+    """Start broadcast flow (owner only)."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⚠️ Owner only!", show_alert=True)
+        return
+
+    await callback.answer()
+
+    # Enter broadcast state
+    await state.set_state(BroadcastState.waiting_for_message)
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Cancel", callback_data="back_main")]
+    ])
+
+    await callback.message.edit_text(
+        "╭───────────────────────────╮\n"
+        "│   📢  BROADCAST MODE      │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        "Send your message now.\n"
+        "\n"
+        "It will be delivered to all users.\n"
+        "\n"
+        "Click Cancel to abort."
+        + get_footer(),
+        reply_markup=keyboard
+    )
 
 
 # =============================================================================

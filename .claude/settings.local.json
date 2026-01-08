@@ -1,3 +1,9 @@
 {
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(python -m py_compile:*)"
+    ]
+  },
   "outputStyle": "Explanatory"
 }
