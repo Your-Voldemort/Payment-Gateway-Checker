@@ -178,7 +178,7 @@ async def cmd_start(message: Message):
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
-    """Handle /help command."""
+    """Handle /help command with interactive menu."""
     help_message = (
         "╭───────────────────────────╮\n"
         "│   📖  GATEWAY HUNTER      │\n"
@@ -199,6 +199,7 @@ async def cmd_help(message: Message):
         "│  /start     ─  Welcome screen\n"
         "│  /register  ─  Activate access\n"
         "│  /help      ─  This guide\n"
+        "│  /url <link> ─  Scan website\n"
         "│  /stats     ─  Bot statistics ⚡\n"
         "│  /broadcast ─  Announcement ⚡\n"
         "│  /cancel    ─  Cancel operation\n"
@@ -207,75 +208,23 @@ async def cmd_help(message: Message):
         "│\n"
         "└────────────────────────────\n"
         "\n"
-        "┌─ 💳 PAYMENT GATEWAYS ─────\n"
-        "│\n"
-        "│  Stripe, PayPal, Braintree,\n"
-        "│  Square, Adyen, Razorpay,\n"
-        "│  Authorize.net, Worldpay,\n"
-        "│  Klarna, Afterpay +400 more\n"
-        "│\n"
-        "└────────────────────────────\n"
-        "\n"
-        "┌─ 🔐 SECURITY DETECTION ───\n"
-        "│\n"
-        "│  ›  3D Secure / VbV / MSC\n"
-        "│  ›  OTP verification\n"
-        "│  ›  CVV/CVC requirements\n"
-        "│\n"
-        "└────────────────────────────\n"
-        "\n"
-        "┌─ 🛡️ PROTECTION DETECTION ─\n"
-        "│\n"
-        "│  ›  Cloudflare detection\n"
-        "│  ›  Captcha systems\n"
-        "│  ›  WAF identification\n"
-        "│\n"
-        "└────────────────────────────\n"
-        "\n"
-        "┌─ 📦 CHECKOUT TYPES ───────\n"
-        "│\n"
-        "│  ›  Hosted payment pages\n"
-        "│  ›  Embedded checkout forms\n"
-        "│  ›  Inbuilt payment systems\n"
-        "│\n"
-        "└────────────────────────────\n"
-        "\n"
-        "┌─ URL FORMATS ─────────────\n"
-        "│\n"
-        "│  ✓  /url example.com\n"
-        "│  ✓  /url www.site.com\n"
-        "│  ✓  /url https://site.com\n"
-        "│  ✓  /url https://site.com/buy\n"
-        "│\n"
-        "│  Send multiple URLs separated\n"
-        "│  by spaces or newlines\n"
-        "│\n"
-        "└────────────────────────────\n"
-        "\n"
-        "┌─ PRO TIPS ────────────────\n"
-        "│\n"
-        "│  ›  Target checkout pages for\n"
-        "│     best gateway detection\n"
-        "│\n"
-        "│  ›  No protocol needed - I'll\n"
-        "│     add https:// automatically\n"
-        "│\n"
-        "│  ›  Batch analyze for speed\n"
-        "│\n"
-        "└────────────────────────────\n"
-        "\n"
-        "╭───────────────────────────╮\n"
-        "│  Created by @volde_is_back │\n"
-        "│  🤖 @UrlDebugger_bot       │\n"
-        "╰───────────────────────────╯"
+        "💡 Click below for detailed guides:"
     )
 
-    await message.answer(help_message)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚀 Getting Started", callback_data="help_start")],
+        [InlineKeyboardButton(text="🔍 How to Scan", callback_data="help_scan")],
+        [InlineKeyboardButton(text="💳 Payment Gateways", callback_data="help_gateways")],
+        [InlineKeyboardButton(text="🔐 Security Features", callback_data="help_security")],
+        [InlineKeyboardButton(text="🏠 Main Menu", callback_data="back_main")]
+    ])
+
+    await message.answer(help_message, reply_markup=keyboard)
 
 
 @router.message(Command("register"))
 async def cmd_register(message: Message):
-    """Handle /register command."""
+    """Handle /register command with buttons."""
     user_id = message.from_user.id
     first_name = message.from_user.first_name or "User"
 
@@ -294,27 +243,25 @@ async def cmd_register(message: Message):
             "You now have full access to\n"
             "Gateway Hunter.\n"
             "\n"
-            "┌─ HOW TO USE ──────────────\n"
+            "┌─ NEXT STEPS ──────────────\n"
             "│\n"
-            "│  Use the /url command:\n"
-            "│\n"
-            "│  ›  /url example.com\n"
-            "│  ›  /url https://site.com\n"
-            "│  ›  Multiple URLs supported\n"
+            "│  1️⃣ Subscribe to a plan\n"
+            "│  2️⃣ Start scanning URLs\n"
+            "│  3️⃣ Get instant results\n"
             "│\n"
             "└────────────────────────────\n"
             "\n"
-            "┌─ LIMITS ──────────────────\n"
-            "│\n"
-            f"│  ›  {Config.MAX_URLS_PER_REQUEST} URLs per request\n"
-            "│  ›  Rate limit applies\n"
-            "│\n"
-            "└────────────────────────────\n"
-            "\n"
-            "🚀 Ready! Send your first URL"
+            "🚀 Ready to get started!"
             + get_footer()
         )
-        await message.answer(success_message)
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💎 View Plans", callback_data="subscription")],
+            [InlineKeyboardButton(text="🔍 Start Scanning", callback_data="scan_url")],
+            [InlineKeyboardButton(text="🏠 Main Menu", callback_data="back_main")]
+        ])
+
+        await message.answer(success_message, reply_markup=keyboard)
 
     elif status == 'existing':
         logger.info(f"User {user_id} already registered")
@@ -326,17 +273,13 @@ async def cmd_register(message: Message):
             f"Hey {first_name}, you're all set! 👋\n"
             "\n"
             "Your account is active.\n"
-            "Use /url <link> to start scanning.\n"
             "\n"
-            "┌─ QUICK ACTIONS ───────────\n"
-            "│\n"
-            "│  ›  /url <link> to scan\n"
-            "│  ›  /help for full guide\n"
-            "│\n"
-            "└────────────────────────────"
+            "What would you like to do?"
             + get_footer()
         )
-        await message.answer(existing_message)
+
+        keyboard = get_main_menu_keyboard()
+        await message.answer(existing_message, reply_markup=keyboard)
 
     else:  # error
         logger.error(f"Failed to register user {user_id}")
@@ -356,7 +299,13 @@ async def cmd_register(message: Message):
             "└────────────────────────────"
             + get_footer()
         )
-        await message.answer(error_message)
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Try Again", callback_data="register")],
+            [InlineKeyboardButton(text="💬 Contact Support", url="https://t.me/volde_is_back")]
+        ])
+
+        await message.answer(error_message, reply_markup=keyboard)
 
 
 @router.message(Command("stats"))
@@ -405,55 +354,52 @@ async def cmd_stats(message: Message):
 
 @router.message(Command("buy"))
 async def cmd_buy(message: Message):
-    """Handle /buy command showing subscription plans."""
-
-    # Plans section
-    plans_text = ""
-    for duration, details in Config.SUBSCRIPTION_PLANS.items():
-        plans_text += f"│  {duration.upper():<3} {details['name']:<10} ›  {details['price']}\n"
+    """Handle /buy command showing subscription plans with buttons."""
 
     buy_message = (
         "╭───────────────────────────╮\n"
         "│   💎  PREMIUM ACCESS      │\n"
         "╰───────────────────────────╯\n"
         "\n"
-        "Get unlimited access to the Gateway Hunter.\n"
+        "Get unlimited access to\n"
+        "Gateway Hunter!\n"
         "\n"
-        "┌─ SUBSCRIPTION PLANS ──────\n"
+        "┌─ FEATURES ────────────────\n"
         "│\n"
-        f"{plans_text}"
+        "│  ✓  400+ Payment Gateways\n"
+        "│  ✓  Unlimited Scans\n"
+        "│  ✓  Security Detection\n"
+        "│  ✓  Priority Support\n"
         "│\n"
         "└────────────────────────────\n"
         "\n"
-        "┌─ PAYMENT METHODS ─────────\n"
-        "│\n"
-        "│  💰 BTC (Bitcoin)\n"
-        f"│  <code>{Config.BTC_ADDRESS}</code>\n"
-        "│\n"
-        "│  💰 LTC (Litecoin)\n"
-        f"│  <code>{Config.LTC_ADDRESS}</code>\n"
-        "│\n"
-        "│  💰 USDT (TRC20)\n"
-        f"│  <code>{Config.USDT_TRC20_ADDRESS}</code>\n"
-        "│\n"
-        "└────────────────────────────\n"
-        "\n"
-        "💡 To purchase:\n"
-        "1. Send payment to one of the addresses\n"
-        "2. Send screenshot to owner @volde_is_back\n"
-        "3. Wait for activation"
+        "💡 Select a plan below:"
         + get_footer()
     )
 
-    await message.answer(buy_message, parse_mode=ParseMode.HTML)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="1 Month - $20", callback_data="plan_1m"),
+            InlineKeyboardButton(text="3 Months - $50", callback_data="plan_3m")
+        ],
+        [
+            InlineKeyboardButton(text="6 Months - $90", callback_data="plan_6m"),
+            InlineKeyboardButton(text="1 Year - $150 🔥", callback_data="plan_1y")
+        ],
+        [InlineKeyboardButton(text="💳 Payment Info", callback_data="payment_info")],
+        [InlineKeyboardButton(text="🏠 Main Menu", callback_data="back_main")]
+    ])
+
+    await message.answer(buy_message, reply_markup=keyboard)
 
 
 @router.message(Command("subscription"))
 async def cmd_subscription(message: Message):
-    """Check subscription status."""
+    """Check subscription status with buttons."""
     user_id = message.from_user.id
 
     if is_owner(user_id):
+        keyboard = get_back_to_menu_keyboard()
         await message.answer(
             "╭───────────────────────────╮\n"
             "│   👑  OWNER ACCESS        │\n"
@@ -461,7 +407,8 @@ async def cmd_subscription(message: Message):
             "\n"
             "You have unlimited lifetime access.\n"
             "You are the system administrator."
-            + get_footer()
+            + get_footer(),
+            reply_markup=keyboard
         )
         return
 
@@ -485,6 +432,11 @@ async def cmd_subscription(message: Message):
             "└────────────────────────────"
             + get_footer()
         )
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏱️ Extend Plan", callback_data="subscription_plans")],
+            [InlineKeyboardButton(text="🏠 Main Menu", callback_data="back_main")]
+        ])
     else:
         status_msg = (
             "╭───────────────────────────╮\n"
@@ -493,11 +445,16 @@ async def cmd_subscription(message: Message):
             "\n"
             "You do not have an active plan.\n"
             "\n"
-            "Use /buy to view plans and upgrade."
+            "Click below to view plans and upgrade!"
             + get_footer()
         )
 
-    await message.answer(status_msg)
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💎 View Plans", callback_data="subscription")],
+            [InlineKeyboardButton(text="🏠 Main Menu", callback_data="back_main")]
+        ])
+
+    await message.answer(status_msg, reply_markup=keyboard)
 
 
 @router.message(Command("addsub"))
@@ -1335,6 +1292,49 @@ async def callback_broadcast_start(callback: CallbackQuery, state: FSMContext):
         "Click Cancel to abort."
         + get_footer(),
         reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data == "subscription_plans")
+async def callback_subscription_plans(callback: CallbackQuery):
+    """Show subscription plans for extension."""
+    await callback.answer()
+
+    # Show plans (same as subscription but for extension)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="1 Month - $20", callback_data="plan_1m"),
+            InlineKeyboardButton(text="3 Months - $50", callback_data="plan_3m")
+        ],
+        [
+            InlineKeyboardButton(text="6 Months - $90", callback_data="plan_6m"),
+            InlineKeyboardButton(text="1 Year - $150 🔥", callback_data="plan_1y")
+        ],
+        [InlineKeyboardButton(text="💳 Payment Info", callback_data="payment_info")],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="subscription")]
+    ])
+
+    await callback.message.edit_text(
+        "╭───────────────────────────╮\n"
+        "│   ⏱️  EXTEND SUBSCRIPTION │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        "Choose how long to extend\n"
+        "your subscription:\n"
+        "\n"
+        "💡 Time will be added to your\n"
+        "current expiry date."
+        + get_footer(),
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data.startswith("rescan_"))
+async def callback_rescan(callback: CallbackQuery):
+    """Handle rescan button - notify user to use /url command."""
+    await callback.answer(
+        "💡 Use /url <link> to scan again!",
+        show_alert=True
     )
 
 
