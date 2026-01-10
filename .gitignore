@@ -57,3 +57,7 @@ MIGRATION_SUMMARY.md
 DATABASE_MIGRATION_COMPLETE.md
 QUICK_START.md
 test_database.py
+gateway_checker.db
+.claude/settings.local.json
+user_ids.json.migrated.backup
+test_rate_limiter.py

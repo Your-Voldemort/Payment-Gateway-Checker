@@ -1408,8 +1408,8 @@ async def cmd_url_check(message: Message, command: CommandObject):
         await cmd_buy(message)
         return
 
-    # Check rate limit
-    if not rate_limiter.is_allowed(user_id):
+    # Check rate limit (now async with database persistence)
+    if not await rate_limiter.is_allowed(user_id):
         wait_time = rate_limiter.get_wait_time(user_id)
         rate_limit_msg = (
             "╭───────────────────────────╮\n"

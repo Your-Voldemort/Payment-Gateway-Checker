@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "WebSearch",
-      "Bash(python -m py_compile:*)"
+      "Bash(python -m py_compile:*)",
+      "Bash(python test_rate_limiter.py:*)"
     ]
   },
   "outputStyle": "Explanatory"
