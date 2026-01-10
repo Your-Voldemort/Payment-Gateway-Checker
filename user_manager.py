@@ -1,14 +1,42 @@
-"""User management functionality with caching."""
+"""User management functionality with caching and SQLite backend."""
 import os
 import json
 import tempfile
 import time
-from typing import Set, Dict, Any, Optional
+from typing import Set, Dict, Any, Optional, List
 from datetime import datetime, timedelta
 from config import Config
 from logger import setup_logger
 
 logger = setup_logger()
+
+# Flag to determine if database backend is available
+_USE_DATABASE = False
+register_user_db = None
+is_user_registered_db = None
+get_user_count_db = None
+get_all_user_ids_db = None
+add_subscription_db = None
+check_subscription_db = None
+get_subscription_expiry_db = None
+migrate_json_to_db = None
+
+try:
+    from database import (
+        register_user_db,
+        is_user_registered_db,
+        get_user_count_db,
+        get_all_user_ids_db,
+        add_subscription_db,
+        check_subscription_db,
+        get_subscription_expiry_db,
+        migrate_from_json as migrate_json_to_db
+    )
+    _USE_DATABASE = True
+    logger.info("Database backend available - will use SQLite for user management")
+except ImportError as e:
+    logger.warning(f"Database backend not available, using JSON file storage: {e}")
+    _USE_DATABASE = False
 
 # JSON file path (same directory as old txt file)
 JSON_FILE = Config.USER_IDS_FILE.replace('.txt', '.json')
@@ -532,3 +560,170 @@ def add_subscription(user_id: int, duration_str: str) -> Optional[str]:
     except Exception as e:
         logger.error(f"Error adding subscription for {user_id}: {str(e)}")
         return None
+
+
+# =============================================================================
+# ASYNC DATABASE WRAPPER FUNCTIONS
+# =============================================================================
+# These functions provide async interface to the database backend.
+# They fall back to synchronous JSON storage if database is not available.
+# =============================================================================
+
+async def async_register_user(user_id: int, username: Optional[str] = None, first_name: Optional[str] = None) -> str:
+    """
+    Async register a user (uses database if available).
+    
+    Args:
+        user_id: The Telegram user ID to register
+        username: Optional username
+        first_name: Optional first name
+    
+    Returns:
+        str: Registration status - 'new', 'existing', or 'error'
+    """
+    if _USE_DATABASE and register_user_db:
+        try:
+            return await register_user_db(user_id, username, first_name)
+        except Exception as e:
+            logger.error(f"Database error in async_register_user, falling back to JSON: {e}")
+            return register_user(user_id)
+    else:
+        # Fallback to sync JSON storage
+        return register_user(user_id)
+
+
+async def async_is_user_registered(user_id: int) -> bool:
+    """
+    Async check if user is registered (uses database if available).
+    
+    Args:
+        user_id: The Telegram user ID to check
+    
+    Returns:
+        bool: True if registered, False otherwise
+    """
+    if _USE_DATABASE and is_user_registered_db:
+        try:
+            return await is_user_registered_db(user_id)
+        except Exception as e:
+            logger.error(f"Database error in async_is_user_registered, falling back to JSON: {e}")
+            return is_user_registered(user_id)
+    else:
+        # Fallback to sync JSON storage
+        return is_user_registered(user_id)
+
+
+async def async_get_user_count() -> int:
+    """
+    Async get total number of registered users (uses database if available).
+    
+    Returns:
+        int: Number of registered users
+    """
+    if _USE_DATABASE and get_user_count_db:
+        try:
+            return await get_user_count_db()
+        except Exception as e:
+            logger.error(f"Database error in async_get_user_count, falling back to JSON: {e}")
+            return get_user_count()
+    else:
+        # Fallback to sync JSON storage
+        return get_user_count()
+
+
+async def async_add_subscription(user_id: int, duration_str: str) -> Optional[str]:
+    """
+    Async add subscription to user (uses database if available).
+    
+    Args:
+        user_id: The Telegram user ID
+        duration_str: Duration string (e.g. "1d", "1m", "1y")
+    
+    Returns:
+        str: New expiry date string if successful, None otherwise
+    """
+    if _USE_DATABASE and add_subscription_db:
+        try:
+            return await add_subscription_db(user_id, duration_str)
+        except Exception as e:
+            logger.error(f"Database error in async_add_subscription, falling back to JSON: {e}")
+            return add_subscription(user_id, duration_str)
+    else:
+        # Fallback to sync JSON storage
+        return add_subscription(user_id, duration_str)
+
+
+async def async_check_subscription(user_id: int) -> bool:
+    """
+    Async check if user has active subscription (uses database if available).
+    
+    Args:
+        user_id: The Telegram user ID
+    
+    Returns:
+        bool: True if subscription is active or user is owner
+    """
+    if _USE_DATABASE and check_subscription_db:
+        try:
+            return await check_subscription_db(user_id, Config.OWNER_USER_ID)
+        except Exception as e:
+            logger.error(f"Database error in async_check_subscription, falling back to JSON: {e}")
+            return check_subscription(user_id)
+    else:
+        # Fallback to sync JSON storage
+        return check_subscription(user_id)
+
+
+async def async_get_subscription_expiry(user_id: int) -> Optional[datetime]:
+    """
+    Async get user subscription expiry (uses database if available).
+    
+    Args:
+        user_id: The Telegram user ID
+    
+    Returns:
+        datetime object if active/future expiry, None if expired or no subscription
+    """
+    if _USE_DATABASE and get_subscription_expiry_db:
+        try:
+            return await get_subscription_expiry_db(user_id)
+        except Exception as e:
+            logger.error(f"Database error in async_get_subscription_expiry, falling back to JSON: {e}")
+            return get_subscription_expiry(user_id)
+    else:
+        # Fallback to sync JSON storage
+        return get_subscription_expiry(user_id)
+
+
+async def async_get_all_user_ids() -> List[int]:
+    """
+    Async get all registered user IDs (uses database if available).
+    
+    Returns:
+        List of registered user IDs
+    """
+    if _USE_DATABASE and get_all_user_ids_db:
+        try:
+            return await get_all_user_ids_db()
+        except Exception as e:
+            logger.error(f"Database error in async_get_all_user_ids, falling back to JSON: {e}")
+            return list(load_user_ids())
+    else:
+        # Fallback to sync JSON storage
+        return list(load_user_ids())
+
+
+async def async_migrate_to_database():
+    """
+    Migrate existing JSON data to SQLite database.
+    
+    This should be called once during bot startup.
+    """
+    if _USE_DATABASE and migrate_json_to_db:
+        try:
+            logger.info("Migrating user data from JSON to SQLite database...")
+            await migrate_json_to_db(JSON_FILE)
+        except Exception as e:
+            logger.error(f"Error during migration: {e}")
+    else:
+        logger.warning("Database backend not available, skipping migration")

@@ -25,8 +25,9 @@ from config import Config
 from logger import setup_logger
 from gateway_checker import check_url
 from user_manager import (
-    load_user_ids, register_user, get_user_count, is_user_registered,
-    check_subscription, add_subscription, get_subscription_expiry
+    async_register_user, async_get_user_count, async_is_user_registered,
+    async_check_subscription, async_add_subscription, async_get_subscription_expiry,
+    async_get_all_user_ids, async_migrate_to_database
 )
 from rate_limiter import RateLimiter
 from utils import format_url_result, normalize_url
@@ -229,7 +230,7 @@ async def cmd_register(message: Message):
     first_name = message.from_user.first_name or "User"
 
     # Register user and get status
-    status = register_user(user_id)
+    status = await async_register_user(user_id, message.from_user.username, first_name)
 
     if status == 'new':
         logger.info(f"User {user_id} registered successfully")
@@ -323,7 +324,7 @@ async def cmd_stats(message: Message):
         await message.answer(unauthorized_msg)
         return
 
-    user_count = get_user_count()
+    user_count = await async_get_user_count()
     rate_status = "✅ Enabled" if Config.ENABLE_RATE_LIMITING else "❌ Disabled"
 
     stats_message = (
@@ -412,7 +413,7 @@ async def cmd_subscription(message: Message):
         )
         return
 
-    expiry = get_subscription_expiry(user_id)
+    expiry = await async_get_subscription_expiry(user_id)
 
     if expiry and expiry > datetime.now():
         time_left = expiry - datetime.now()
@@ -472,7 +473,7 @@ async def cmd_addsub(message: Message):
         target_user_id = int(parts[1])
         duration = parts[2]
 
-        new_expiry = add_subscription(target_user_id, duration)
+        new_expiry = await async_add_subscription(target_user_id, duration)
 
         if new_expiry:
             await message.answer(
@@ -587,7 +588,7 @@ async def handle_broadcast_message(message: Message, state: FSMContext, bot: Bot
         return
 
     # Send broadcast to all users
-    user_ids = load_user_ids()
+    user_ids = await async_get_all_user_ids()
     stats = {'sent': 0, 'failed': 0}
 
     logger.info(f"Broadcasting message to {len(user_ids)} users")
@@ -658,7 +659,7 @@ async def callback_scan_url(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
 
     # Check if user is registered
-    if not is_user_registered(user_id):
+    if not await async_is_user_registered(user_id):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Register Now", callback_data="register")],
             [InlineKeyboardButton(text="⬅️ Back", callback_data="back_main")]
@@ -678,7 +679,7 @@ async def callback_scan_url(callback: CallbackQuery, state: FSMContext):
         return
 
     # Check subscription
-    if not check_subscription(user_id):
+    if not await async_check_subscription(user_id):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💎 View Plans", callback_data="subscription")],
             [InlineKeyboardButton(text="⬅️ Back", callback_data="back_main")]
@@ -786,7 +787,7 @@ async def callback_register(callback: CallbackQuery):
     user_id = callback.from_user.id
     first_name = callback.from_user.first_name or "User"
 
-    status = register_user(user_id)
+    status = await async_register_user(user_id, message.from_user.username, first_name)
 
     if status == 'new':
         logger.info(f"User {user_id} registered via button")
@@ -844,7 +845,7 @@ async def callback_subscription(callback: CallbackQuery):
         return
 
     # Check current subscription
-    expiry = get_subscription_expiry(user_id)
+    expiry = await async_get_subscription_expiry(user_id)
 
     if expiry and expiry > datetime.now():
         time_left = expiry - datetime.now()
@@ -1231,7 +1232,7 @@ async def callback_stats(callback: CallbackQuery):
 
     await callback.answer()
 
-    user_count = get_user_count()
+    user_count = await async_get_user_count()
     rate_status = "✅ Enabled" if Config.ENABLE_RATE_LIMITING else "❌ Disabled"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -1370,7 +1371,7 @@ async def cmd_url_check(message: Message, command: CommandObject):
         return
 
     # Check if user is registered
-    if not is_user_registered(user_id):
+    if not await async_is_user_registered(user_id):
         not_registered_msg = (
             "╭───────────────────────────╮\n"
             "│   ⚠️  ACCESS REQUIRED     │\n"
@@ -1390,7 +1391,7 @@ async def cmd_url_check(message: Message, command: CommandObject):
         return
 
     # Check subscription status
-    if not check_subscription(user_id):
+    if not await async_check_subscription(user_id):
         payment_required_msg = (
             "╭───────────────────────────╮\n"
             "│   💳  SUBSCRIPTION NEEDED │\n"
@@ -1630,10 +1631,19 @@ async def main():
     logger.info(f"Bot username: @UrlDebugger_bot")
     logger.info(f"Owner ID: {Config.OWNER_USER_ID}")
 
+    # Initialize database and migrate from JSON if needed
+    logger.info("Initializing database...")
+    try:
+        await async_migrate_to_database()
+        logger.info("Database ready")
+    except Exception as e:
+        logger.error(f"Database initialization failed (will use JSON fallback): {e}")
+
     # Log performance optimization status
     logger.info("Performance optimizations enabled:")
     logger.info("  - Native async (no sync-to-async bridge)")
     logger.info("  - HTTP connection pooling (100 total, 10 per host)")
+    logger.info("  - SQLite database with async operations")
     logger.info("  - User cache with 60s TTL (reduced disk I/O)")
 
     # Check for Aho-Corasick availability
