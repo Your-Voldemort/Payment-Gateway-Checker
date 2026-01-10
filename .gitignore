@@ -61,3 +61,5 @@ gateway_checker.db
 .claude/settings.local.json
 user_ids.json.migrated.backup
 test_rate_limiter.py
+test_retry_logic.py
+demo_retry_logic.py
