@@ -77,3 +77,13 @@ test_shutdown.py
 test_progress_indicators.py
 test_cache.py
 test_cache_integration.py
+CRITICAL-FIXES-SUMMARY.md
+CRITICAL-002-FIX-SUMMARY.md
+WARNING-001-FIX-SUMMARY.md
+verify_fixes.py
+verify_all_fixes.py
+test_singleton.py
+test_singleton_structure.py
+test_integration.py
+test_detection.py
+test_atomic_write.py
