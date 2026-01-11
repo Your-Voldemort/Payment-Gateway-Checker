@@ -32,6 +32,8 @@ from user_manager import (
 from rate_limiter import RateLimiter
 from utils import format_url_result, normalize_url
 from http_client import get_http_session, close_http_client
+from security import sanitize_url, sanitize_text_input, validate_duration
+from audit_log import log_admin_action, get_audit_logs, get_audit_log_stats
 
 # Initialize logger
 logger = setup_logger()
@@ -207,6 +209,7 @@ async def cmd_help(message: Message):
         "│  /help      ─  This guide\n"
         "│  /url <link> ─  Scan website\n"
         "│  /stats     ─  Bot statistics ⚡\n"
+        "│  /auditlog  ─  Admin action log ⚡\n"
         "│  /broadcast ─  Announcement ⚡\n"
         "│  /cancel    ─  Cancel operation\n"
         "│\n"
@@ -358,6 +361,87 @@ async def cmd_stats(message: Message):
     await message.answer(stats_message)
 
 
+@router.message(Command("auditlog"))
+async def cmd_auditlog(message: Message):
+    """Handle /auditlog command (Owner only) - View admin action logs."""
+    if not is_owner(message.from_user.id):
+        unauthorized_msg = (
+            "╭───────────────────────────╮\n"
+            "│   🔒  ACCESS DENIED       │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "This command is owner-only."
+            + get_footer()
+        )
+        await message.answer(unauthorized_msg)
+        return
+
+    # Get audit log statistics
+    stats = await get_audit_log_stats()
+    
+    # Get recent logs
+    logs = await get_audit_logs(limit=10)
+    
+    # Build header with statistics
+    header = (
+        "╭───────────────────────────╮\n"
+        "│   📋  AUDIT LOG           │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        "┌─ STATISTICS ─────────────\n"
+        "│\n"
+        f"│  Total Entries  ›  {stats['total_entries']}\n"
+        f"│  Last 24 Hours  ›  {stats['last_24h']}\n"
+        "│\n"
+        "└────────────────────────────\n"
+    )
+    
+    # Build actions summary
+    if stats['actions_by_type']:
+        header += "\n┌─ ACTIONS BY TYPE ────────\n│\n"
+        for action, count in stats['actions_by_type'].items():
+            header += f"│  {action.capitalize():<12}›  {count}\n"
+        header += "│\n└────────────────────────────\n"
+    
+    # Build recent logs list
+    if logs:
+        header += "\n┌─ RECENT ACTIONS ─────────\n│\n"
+        for log in logs[:5]:  # Show only 5 most recent
+            # Parse timestamp
+            try:
+                from datetime import datetime
+                ts = datetime.fromisoformat(log['timestamp'])
+                time_str = ts.strftime("%m/%d %H:%M")
+            except:
+                time_str = "N/A"
+            
+            action_emoji = {
+                'broadcast': '📢',
+                'addsub': '💎',
+                'admin': '⚙️'
+            }.get(log['action'], '📝')
+            
+            target = f"→ {log['target_id']}" if log['target_id'] else ""
+            
+            header += f"│  {action_emoji} {log['action']:<10} {target}\n"
+            header += f"│     {time_str}\n"
+            
+            # Show details if short enough
+            if log['details'] and len(log['details']) < 40:
+                header += f"│     {log['details'][:37]}...\n"
+            
+            header += "│\n"
+        
+        header += "└────────────────────────────\n"
+    else:
+        header += "\n📭 No audit logs yet\n"
+    
+    header += "\n💡 Use /auditlog <limit> to see more\n"
+    header += get_footer()
+    
+    await message.answer(header)
+
+
 @router.message(Command("buy"))
 async def cmd_buy(message: Message):
     """Handle /buy command showing subscription plans with buttons."""
@@ -478,9 +562,29 @@ async def cmd_addsub(message: Message):
         target_user_id = int(parts[1])
         duration = parts[2]
 
+        # Validate duration format
+        if not validate_duration(duration):
+            await message.answer(
+                "❌ Invalid duration format!\n\n"
+                "Valid formats:\n"
+                "  • 1d, 7d, 30d (days)\n"
+                "  • 1m, 3m, 6m (months)\n"
+                "  • 1y, 2y (years)\n\n"
+                "Example: /addsub 123456789 1m"
+            )
+            return
+
         new_expiry = await async_add_subscription(target_user_id, duration)
 
         if new_expiry:
+            # Log admin action
+            await log_admin_action(
+                admin_user_id=message.from_user.id,
+                action="addsub",
+                target_user_id=target_user_id,
+                details=f"Added {duration} subscription, new expiry: {new_expiry}"
+            )
+            
             await message.answer(
                 f"✅ Success!\n\n"
                 f"User: {target_user_id}\n"
@@ -592,6 +696,9 @@ async def handle_broadcast_message(message: Message, state: FSMContext, bot: Bot
         await message.answer(invalid_msg)
         return
 
+    # Sanitize broadcast message text
+    broadcast_text = sanitize_text_input(message.text, max_length=4000)
+
     # Send broadcast to all users
     user_ids = await async_get_all_user_ids()
     stats = {'sent': 0, 'failed': 0}
@@ -600,13 +707,20 @@ async def handle_broadcast_message(message: Message, state: FSMContext, bot: Bot
 
     for user_id in user_ids:
         try:
-            await bot.send_message(user_id, message.text)
+            await bot.send_message(user_id, broadcast_text)
             stats['sent'] += 1
         except Exception as e:
             logger.error(f"Failed to send message to {user_id}: {str(e)}")
             stats['failed'] += 1
 
     logger.info(f"Broadcast complete - Sent: {stats['sent']}, Failed: {stats['failed']}")
+
+    # Log admin action
+    await log_admin_action(
+        admin_user_id=message.from_user.id,
+        action="broadcast",
+        details=f"Sent to {stats['sent']} users, {stats['failed']} failed"
+    )
 
     result_message = (
         "╭───────────────────────────╮\n"
@@ -739,8 +853,28 @@ async def handle_scan_url_input(message: Message, state: FSMContext):
         await message.answer("❌ No valid URLs provided. Use /start to try again.")
         return
 
-    # Normalize URLs
-    urls = [normalize_url(url) for url in raw_urls]
+    # Sanitize and normalize URLs
+    urls = []
+    for raw_url in raw_urls:
+        normalized = normalize_url(raw_url)
+        sanitized, is_safe = sanitize_url(normalized)
+        if not is_safe:
+            await message.answer(
+                "⚠️ Suspicious URL detected and blocked:\n\n"
+                f"{raw_url[:50]}...\n\n"
+                "Please provide a valid HTTP(S) URL."
+                + get_footer()
+            )
+            continue
+        urls.append(sanitized)
+    
+    if not urls:
+        await message.answer(
+            "❌ All provided URLs were blocked for security reasons.\n\n"
+            "Please provide valid HTTP(S) URLs."
+            + get_footer()
+        )
+        return
 
     if len(urls) > Config.MAX_URLS_PER_REQUEST:
         await message.answer(
@@ -1497,8 +1631,46 @@ async def cmd_url_check(message: Message, command: CommandObject, state: FSMCont
         # Should be covered by initial check, but safety net
         return
 
-    # Normalize URLs (add https:// if missing)
-    urls = [normalize_url(url) for url in raw_urls]
+    # Sanitize and normalize URLs (add https:// if missing)
+    urls = []
+    for raw_url in raw_urls:
+        normalized = normalize_url(raw_url)
+        sanitized, is_safe = sanitize_url(normalized)
+        if not is_safe:
+            await message.answer(
+                "╭───────────────────────────╮\n"
+                "│   ⚠️  SUSPICIOUS URL      │\n"
+                "╰───────────────────────────╯\n"
+                "\n"
+                "┌─ SECURITY WARNING ────────\n"
+                "│\n"
+                "│  A potentially dangerous URL\n"
+                "│  was detected and blocked.\n"
+                "│\n"
+                f"│  URL: {raw_url[:30]}...\n"
+                "│\n"
+                "│  Please check the URL and\n"
+                "│  try again with a valid link.\n"
+                "│\n"
+                "└────────────────────────────"
+                + get_footer()
+            )
+            continue
+        urls.append(sanitized)
+    
+    if not urls:
+        await message.answer(
+            "╭───────────────────────────╮\n"
+            "│   ❌  NO VALID URLs       │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "All provided URLs were blocked\n"
+            "for security reasons.\n"
+            "\n"
+            "Please provide valid HTTP(S) URLs."
+            + get_footer()
+        )
+        return
 
     if len(urls) > Config.MAX_URLS_PER_REQUEST:
         too_many_msg = (

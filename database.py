@@ -82,6 +82,18 @@ class Database:
                 )
             """)
             
+            # Audit log table for admin actions
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    admin_user_id INTEGER NOT NULL,
+                    action TEXT NOT NULL,
+                    target_user_id INTEGER,
+                    details TEXT,
+                    timestamp TEXT NOT NULL
+                )
+            """)
+            
             # Indexes for performance
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_scan_history_user 
@@ -96,6 +108,16 @@ class Database:
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_users_subscription 
                 ON users(subscription_expiry)
+            """)
+            
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp
+                ON audit_log(timestamp DESC)
+            """)
+            
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_audit_log_admin
+                ON audit_log(admin_user_id, timestamp DESC)
             """)
             
             # Schema version tracking
