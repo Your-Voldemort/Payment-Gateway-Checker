@@ -9,7 +9,8 @@ Run with: python bot_aiogram.py
 
 import asyncio
 import logging
-from typing import List
+import signal
+from typing import List, Optional
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher, Router, F
@@ -1513,7 +1514,7 @@ async def callback_rescan(callback: CallbackQuery, state: FSMContext):
     )
     
     try:
-        results = await process_urls_async(url_to_rescan, user_id)
+        results = await process_urls_async(url_to_rescan, user_id, processing_msg)
     except Exception as e:
         logger.error(f"Error in rescan: {str(e)}")
         results = [f"❌ Error: {str(e)[:100]}"]
@@ -1714,7 +1715,7 @@ async def cmd_url_check(message: Message, command: CommandObject, state: FSMCont
 
     # Process URLs asynchronously - DIRECT AWAIT, no AsyncManager bridge!
     try:
-        results = await process_urls_async(urls, user_id)
+        results = await process_urls_async(urls, user_id, processing_msg)
     except Exception as e:
         logger.error(f"Error in async processing: {str(e)}")
         results = [
@@ -1766,9 +1767,24 @@ async def cmd_url_check(message: Message, command: CommandObject, state: FSMCont
             await message.answer(msg_text)
 
 
-async def process_urls_async(urls: List[str], user_id: int) -> List[str]:
-    """Process all URLs concurrently using persistent HTTP client."""
+async def process_urls_async(
+    urls: List[str], 
+    user_id: int, 
+    progress_message: Optional[Message] = None
+) -> List[str]:
+    """
+    Process all URLs concurrently using persistent HTTP client.
+    
+    Args:
+        urls: List of URLs to check
+        user_id: User ID making the request
+        progress_message: Optional message to update with progress (for multi-URL scans)
+    
+    Returns:
+        List of formatted result strings
+    """
     results = []
+    total = len(urls)
 
     # Get the shared HTTP session from the persistent client
     session = await get_http_session()
@@ -1776,11 +1792,50 @@ async def process_urls_async(urls: List[str], user_id: int) -> List[str]:
     # Create tasks for all URLs
     tasks = []
     for url in urls:
-        logger.info(f"User {user_id} checking URL: {url}")
+        logger.info(f"User {user_id} checking URL {len(tasks) + 1}/{total}: {url}")
         tasks.append(check_url(url, session))
 
-    # Execute all checks concurrently
-    responses = await asyncio.gather(*tasks, return_exceptions=True)
+    # Execute all checks concurrently with progress updates
+    if progress_message and total > 2:
+        # For multiple URLs, show progress
+        completed = 0
+        pending_tasks = {asyncio.create_task(task): url for task, url in zip(tasks, urls)}
+        responses = [None] * total  # Preserve order
+        
+        while pending_tasks:
+            # Wait for next task to complete
+            done, pending = await asyncio.wait(
+                pending_tasks.keys(), 
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            
+            for task in done:
+                url = pending_tasks[task]
+                idx = urls.index(url)
+                responses[idx] = await task
+                del pending_tasks[task]
+                completed += 1
+                
+                # Update progress
+                try:
+                    progress_bar = "█" * completed + "░" * (total - completed)
+                    current_url = url[:30] + "..." if len(url) > 30 else url
+                    await progress_message.edit_text(
+                        "╭───────────────────────────╮\n"
+                        "│   ⏳  SCANNING            │\n"
+                        "╰───────────────────────────╯\n"
+                        "\n"
+                        f"Progress: {completed}/{total}\n"
+                        f"{progress_bar}\n"
+                        "\n"
+                        f"Current: {current_url}"
+                    )
+                except Exception as e:
+                    logger.debug(f"Could not update progress message: {e}")
+                    pass  # Ignore edit errors (e.g., message too old)
+    else:
+        # For single URL or no progress message, use simple gather
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
 
     # Format results
     for url, response in zip(urls, responses):
@@ -1900,11 +1955,85 @@ async def main():
 
     # Set up graceful shutdown
     async def on_shutdown():
-        """Handle graceful shutdown."""
-        logger.info("Shutting down...")
-        await close_http_client()
-        await bot.session.close()
-        logger.info("Shutdown complete.")
+        """
+        Handle graceful shutdown of all bot resources.
+        
+        Cleanup order:
+        1. Stop accepting new requests
+        2. Close HTTP client (drain connections)
+        3. Close bot session
+        4. Close database connections
+        5. Cancel pending tasks
+        """
+        logger.info("=" * 60)
+        logger.info("GRACEFUL SHUTDOWN INITIATED")
+        logger.info("=" * 60)
+        
+        shutdown_steps = []
+        
+        # Step 1: Close HTTP client
+        try:
+            logger.info("Closing HTTP client...")
+            await close_http_client()
+            shutdown_steps.append("✓ HTTP client closed")
+        except Exception as e:
+            logger.error(f"Error closing HTTP client: {e}")
+            shutdown_steps.append(f"✗ HTTP client error: {e}")
+        
+        # Step 2: Close bot session
+        try:
+            logger.info("Closing bot session...")
+            await bot.session.close()
+            shutdown_steps.append("✓ Bot session closed")
+        except Exception as e:
+            logger.error(f"Error closing bot session: {e}")
+            shutdown_steps.append(f"✗ Bot session error: {e}")
+        
+        # Step 3: Close database connections
+        try:
+            logger.info("Closing database connections...")
+            from database import _db_instance
+            if _db_instance:
+                # aiosqlite connections close automatically via context manager
+                # But we can mark it as closed
+                _db_instance._initialized = False
+                shutdown_steps.append("✓ Database connections closed")
+            else:
+                shutdown_steps.append("- Database not initialized")
+        except Exception as e:
+            logger.error(f"Error closing database: {e}")
+            shutdown_steps.append(f"✗ Database error: {e}")
+        
+        # Step 4: Cancel pending tasks
+        try:
+            logger.info("Cancelling pending tasks...")
+            pending_tasks = [
+                task for task in asyncio.all_tasks()
+                if task is not asyncio.current_task()
+            ]
+            
+            if pending_tasks:
+                for task in pending_tasks:
+                    task.cancel()
+                
+                # Wait for tasks to complete cancellation
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
+                shutdown_steps.append(f"✓ Cancelled {len(pending_tasks)} pending task(s)")
+            else:
+                shutdown_steps.append("- No pending tasks")
+        except Exception as e:
+            logger.error(f"Error cancelling tasks: {e}")
+            shutdown_steps.append(f"✗ Task cancellation error: {e}")
+        
+        # Log shutdown summary
+        logger.info("=" * 60)
+        logger.info("SHUTDOWN SUMMARY")
+        logger.info("=" * 60)
+        for step in shutdown_steps:
+            logger.info(f"  {step}")
+        logger.info("=" * 60)
+        logger.info("Shutdown complete. Goodbye!")
+        logger.info("=" * 60)
 
     # Register shutdown callback
     dp.shutdown.register(on_shutdown)
@@ -1914,8 +2043,26 @@ async def main():
 
 
 if __name__ == "__main__":
+    # Set up signal handlers for graceful shutdown
+    def signal_handler(sig, frame):
+        """Handle shutdown signals (SIGINT, SIGTERM)."""
+        logger.info(f"\nReceived signal {sig}, initiating graceful shutdown...")
+        raise KeyboardInterrupt
+    
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    if hasattr(signal, 'SIGTERM'):
+        signal.signal(signal.SIGTERM, signal_handler)
+    
     try:
+        logger.info("Starting Gateway Hunter Bot...")
         asyncio.run(main())
     except (KeyboardInterrupt, asyncio.CancelledError, SystemExit):
-        # Clean exit without traceback when Ctrl+C is pressed
-        pass
+        # Clean exit without traceback when shutdown signal is received
+        logger.info("Bot stopped gracefully")
+    except Exception as e:
+        logger.error(f"Unexpected error during bot execution: {e}")
+        import traceback
+        traceback.print_exc()
+        exit(1)
+

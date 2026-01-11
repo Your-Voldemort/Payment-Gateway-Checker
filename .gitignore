@@ -73,3 +73,5 @@ test_security.py
 test_sanitization_integration.py
 test_audit_log.py
 test_audit_integration.py
+test_shutdown.py
+test_progress_indicators.py
