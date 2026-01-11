@@ -94,6 +94,17 @@ class Database:
                 )
             """)
             
+            # Scan cache table for result caching
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS scan_cache (
+                    url_hash TEXT PRIMARY KEY,
+                    url TEXT NOT NULL,
+                    result_data TEXT NOT NULL,
+                    cached_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                )
+            """)
+            
             # Indexes for performance
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_scan_history_user 
@@ -118,6 +129,11 @@ class Database:
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_audit_log_admin
                 ON audit_log(admin_user_id, timestamp DESC)
+            """)
+            
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_scan_cache_expires
+                ON scan_cache(expires_at)
             """)
             
             # Schema version tracking

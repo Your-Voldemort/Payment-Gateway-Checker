@@ -1,4 +1,4 @@
-"""Payment gateway checking functionality with optimized detection and retry logic."""
+"""Payment gateway checking functionality with optimized detection, retry logic, and result caching."""
 import aiohttp
 import asyncio
 from typing import Tuple, List
@@ -6,6 +6,7 @@ from config import Config
 from utils import is_valid_url
 from detection import analyze_url_response
 from user_agents import get_random_user_agent
+from cache_manager import get_cached_result, save_to_cache
 from logger import setup_logger
 
 logger = setup_logger()
@@ -19,16 +20,19 @@ RETRY_BACKOFF = 2  # exponential backoff multiplier
 async def check_url(
     url: str,
     session: aiohttp.ClientSession = None,
-    retry_count: int = 0
+    retry_count: int = 0,
+    use_cache: bool = True
 ) -> Tuple[List[str], int, bool, bool, str, str, str]:
     """
     Check the provided URL for payment gateways, security features, and IP info.
     Includes automatic retry logic for transient failures (5xx errors, timeouts, connection errors).
+    Supports result caching to reduce duplicate checks.
 
     Args:
         url: The URL to check
         session: Optional aiohttp ClientSession for connection reuse
         retry_count: Current retry attempt (internal use, starts at 0)
+        use_cache: Whether to use cached results (default: True)
 
     Returns:
         Tuple containing:
@@ -43,6 +47,21 @@ async def check_url(
     if not is_valid_url(url):
         logger.warning(f"Invalid URL provided: {url}")
         return [], 400, False, False, "Invalid URL", "N/A", "N/A"
+
+    # Check cache first (only on first attempt, not retries)
+    if use_cache and retry_count == 0:
+        cached = await get_cached_result(url)
+        if cached:
+            logger.info(f"Returning cached result for {url[:50]}...")
+            return (
+                cached['gateways'],
+                cached['status_code'],
+                cached['captcha'],
+                cached['cloudflare'],
+                cached['security_type'],
+                cached['cvv_status'],
+                cached['inbuilt_status']
+            )
 
     # Use rotating user agent to minimize rate limiting
     user_agent = get_random_user_agent()
@@ -89,6 +108,19 @@ async def check_url(
                        f"Gateways: {len(analysis['gateways'])} "
                        f"(High confidence: {len(analysis['high_confidence_gateways'])})")
 
+            # Cache the result if successful (status 200) and caching is enabled
+            if use_cache and response.status == 200:
+                cache_data = {
+                    'gateways': analysis['gateways'],
+                    'status_code': response.status,
+                    'captcha': analysis['captcha'],
+                    'cloudflare': analysis['cloudflare'],
+                    'security_type': analysis['security_type'],
+                    'cvv_status': analysis['cvv_status'],
+                    'inbuilt_status': analysis['inbuilt_status']
+                }
+                await save_to_cache(url, cache_data)
+
             return (
                 analysis['gateways'],
                 response.status,
@@ -115,7 +147,7 @@ async def check_url(
             delay = RETRY_DELAY * (RETRY_BACKOFF ** retry_count)
             logger.warning(f"Server error {status_code} for {url}, retrying in {delay}s...")
             await asyncio.sleep(delay)
-            return await check_url(url, session, retry_count + 1)
+            return await check_url(url, session, retry_count + 1, use_cache)
 
         logger.error(f"HTTP error for {url} after {MAX_RETRIES} retries: {status_code}")
         return [], status_code, False, False, f"HTTP Error: {status_code}", "N/A", "N/A"
@@ -126,7 +158,7 @@ async def check_url(
             delay = RETRY_DELAY * (RETRY_BACKOFF ** retry_count)
             logger.warning(f"Timeout for {url}, retrying in {delay}s...")
             await asyncio.sleep(delay)
-            return await check_url(url, session, retry_count + 1)
+            return await check_url(url, session, retry_count + 1, use_cache)
 
         logger.error(f"Timeout for {url} after {MAX_RETRIES} retries")
         return [], 408, False, False, "Request Timeout", "N/A", "N/A"
@@ -137,7 +169,7 @@ async def check_url(
             delay = RETRY_DELAY * (RETRY_BACKOFF ** retry_count)
             logger.warning(f"Connection error for {url}, retrying in {delay}s...")
             await asyncio.sleep(delay)
-            return await check_url(url, session, retry_count + 1)
+            return await check_url(url, session, retry_count + 1, use_cache)
 
         logger.error(f"Connection error for {url} after {MAX_RETRIES} retries: {str(conn_err)}")
         return [], 503, False, False, "Connection Error", "N/A", "N/A"

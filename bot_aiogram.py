@@ -443,6 +443,129 @@ async def cmd_auditlog(message: Message):
     await message.answer(header)
 
 
+@router.message(Command("cachestats"))
+async def cmd_cache_stats(message: Message):
+    """Handle /cachestats command (Owner only) - View cache statistics."""
+    if not is_owner(message.from_user.id):
+        unauthorized_msg = (
+            "╭───────────────────────────╮\n"
+            "│   🔒  ACCESS DENIED       │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "This command is owner-only."
+            + get_footer()
+        )
+        await message.answer(unauthorized_msg)
+        return
+    
+    from cache_manager import get_cache_stats
+    
+    # Get cache statistics
+    stats = await get_cache_stats()
+    
+    # Calculate cache hit rate (if we have the data)
+    total = stats.get('total_entries', 0)
+    active = stats.get('active_entries', 0)
+    expired = stats.get('expired_entries', 0)
+    
+    # Format timestamps
+    oldest = stats.get('oldest_entry', 'N/A')
+    newest = stats.get('newest_entry', 'N/A')
+    
+    if oldest != 'N/A':
+        try:
+            from datetime import datetime
+            oldest_dt = datetime.fromisoformat(oldest)
+            oldest = oldest_dt.strftime("%m/%d %H:%M")
+        except:
+            pass
+    
+    if newest != 'N/A':
+        try:
+            from datetime import datetime
+            newest_dt = datetime.fromisoformat(newest)
+            newest = newest_dt.strftime("%m/%d %H:%M")
+        except:
+            pass
+    
+    stats_msg = (
+        "╭───────────────────────────╮\n"
+        "│   📊  CACHE STATISTICS    │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        "┌─ CACHE STATUS ───────────\n"
+        "│\n"
+        f"│  Total Entries   ›  {total}\n"
+        f"│  Active          ›  {active}\n"
+        f"│  Expired         ›  {expired}\n"
+        "│\n"
+        "└────────────────────────────\n"
+        "\n"
+        "┌─ TIMESTAMPS ─────────────\n"
+        "│\n"
+        f"│  Oldest Entry    ›  {oldest}\n"
+        f"│  Newest Entry    ›  {newest}\n"
+        "│\n"
+        "└────────────────────────────\n"
+        "\n"
+        "💡 TTL: 1 hour per entry\n"
+        "💡 Use /clearcache to remove expired\n"
+        + get_footer()
+    )
+    
+    await message.answer(stats_msg)
+
+
+@router.message(Command("clearcache"))
+async def cmd_clear_cache(message: Message):
+    """Handle /clearcache command (Owner only) - Clear expired cache entries."""
+    if not is_owner(message.from_user.id):
+        unauthorized_msg = (
+            "╭───────────────────────────╮\n"
+            "│   🔒  ACCESS DENIED       │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "This command is owner-only."
+            + get_footer()
+        )
+        await message.answer(unauthorized_msg)
+        return
+    
+    from cache_manager import clear_expired_cache
+    
+    # Show processing message
+    processing_msg = await message.answer(
+        "╭───────────────────────────╮\n"
+        "│   🧹  CLEARING CACHE      │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        "Removing expired entries..."
+    )
+    
+    # Clear expired cache
+    deleted = await clear_expired_cache()
+    
+    # Delete processing message
+    try:
+        await processing_msg.delete()
+    except:
+        pass
+    
+    # Send result
+    result_msg = (
+        "╭───────────────────────────╮\n"
+        "│   ✅  CACHE CLEARED       │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        f"Removed {deleted} expired entries\n"
+        "\n"
+        "💡 Use /cachestats to view stats"
+        + get_footer()
+    )
+    
+    await message.answer(result_msg)
+
+
 @router.message(Command("buy"))
 async def cmd_buy(message: Message):
     """Handle /buy command showing subscription plans with buttons."""

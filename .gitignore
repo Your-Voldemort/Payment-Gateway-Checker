@@ -75,3 +75,5 @@ test_audit_log.py
 test_audit_integration.py
 test_shutdown.py
 test_progress_indicators.py
+test_cache.py
+test_cache_integration.py
