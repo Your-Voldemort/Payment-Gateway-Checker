@@ -12,6 +12,10 @@ class Config:
     TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
     OWNER_USER_ID = int(os.getenv('OWNER_USER_ID', 0))
     
+    # Contact Information
+    CONTACT_USERNAME = os.getenv('CONTACT_USERNAME', 'volde_is_back')
+    BOT_USERNAME = os.getenv('BOT_USERNAME', 'UrlDebugger_bot')
+    
     # Request Settings
     REQUEST_TIMEOUT = int(os.getenv('REQUEST_TIMEOUT', 10))
     MAX_URLS_PER_REQUEST = int(os.getenv('MAX_URLS_PER_REQUEST', 10))

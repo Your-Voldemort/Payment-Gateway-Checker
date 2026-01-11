@@ -63,3 +63,8 @@ user_ids.json.migrated.backup
 test_rate_limiter.py
 test_retry_logic.py
 demo_retry_logic.py
+RESCAN_IMPLEMENTATION.md
+test_rescan_implementation.py
+bot_aiogram.py
+CONTACT_CONFIG_IMPLEMENTATION.md
+test_contact_config.py

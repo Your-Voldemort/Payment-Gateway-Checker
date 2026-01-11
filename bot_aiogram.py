@@ -65,6 +65,11 @@ class ScanState(StatesGroup):
     waiting_for_url = State()
 
 
+class ScanCache(StatesGroup):
+    """Cache for recent scans."""
+    last_urls = State()
+
+
 # =============================================================================
 # UI COMPONENTS - Reusable message building blocks
 # =============================================================================
@@ -74,8 +79,8 @@ def get_footer() -> str:
     return (
         "\n"
         "╭───────────────────────────╮\n"
-        "│  @volde_is_back           │\n"
-        "│  🤖 @UrlDebugger_bot      │\n"
+        f"│  @{Config.CONTACT_USERNAME:<20}│\n"
+        f"│  🤖 @{Config.BOT_USERNAME:<17}│\n"
         "╰───────────────────────────╯"
     )
 
@@ -295,7 +300,7 @@ async def cmd_register(message: Message):
             "│\n"
             "│  ›  Wait a few seconds\n"
             "│  ›  Send /register again\n"
-            "│  ›  Contact @volde_is_back\n"
+            f"│  ›  Contact @{Config.CONTACT_USERNAME}\n"
             "│\n"
             "└────────────────────────────"
             + get_footer()
@@ -303,7 +308,7 @@ async def cmd_register(message: Message):
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔄 Try Again", callback_data="register")],
-            [InlineKeyboardButton(text="💬 Contact Support", url="https://t.me/volde_is_back")]
+            [InlineKeyboardButton(text="💬 Contact Support", url=f"https://t.me/{Config.CONTACT_USERNAME}")]
         ])
 
         await message.answer(error_message, reply_markup=keyboard)
@@ -340,7 +345,7 @@ async def cmd_stats(message: Message):
         "\n"
         "┌─ CONFIGURATION ──────────\n"
         "│\n"
-        "│  Bot        ›  @UrlDebugger_bot\n"
+        f"│  Bot        ›  @{Config.BOT_USERNAME}\n"
         f"│  Rate Limit ›  {rate_status}\n"
         f"│  Max URLs   ›  {Config.MAX_URLS_PER_REQUEST}/request\n"
         "│\n"
@@ -768,6 +773,9 @@ async def handle_scan_url_input(message: Message, state: FSMContext):
     except:
         pass
 
+    # Save URLs to state for rescan functionality
+    await state.update_data(last_urls=urls)
+
     # Send results with action buttons
     for i, result in enumerate(results):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -959,7 +967,7 @@ async def callback_payment_method(callback: CallbackQuery):
     crypto_name, address = addresses.get(crypto, ("Unknown", "N/A"))
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Payment Sent", url="https://t.me/volde_is_back")],
+        [InlineKeyboardButton(text="✅ Payment Sent", url=f"https://t.me/{Config.CONTACT_USERNAME}")],
         [InlineKeyboardButton(text="⬅️ Back", callback_data=f"plan_{plan_id}")]
     ])
 
@@ -1003,7 +1011,7 @@ async def callback_payment_info(callback: CallbackQuery):
         "💡 Tap to copy address\n"
         "\n"
         "After payment, contact:\n"
-        "👤 @volde_is_back"
+        f"👤 @{Config.CONTACT_USERNAME}"
         + get_footer(),
         reply_markup=keyboard,
         parse_mode="Markdown"
@@ -1020,7 +1028,7 @@ async def callback_help(callback: CallbackQuery):
         [InlineKeyboardButton(text="🔍 How to Scan", callback_data="help_scan")],
         [InlineKeyboardButton(text="💳 Payment Gateways", callback_data="help_gateways")],
         [InlineKeyboardButton(text="🔐 Security Features", callback_data="help_security")],
-        [InlineKeyboardButton(text="💬 Contact Support", url="https://t.me/volde_is_back")],
+        [InlineKeyboardButton(text="💬 Contact Support", url=f"https://t.me/{Config.CONTACT_USERNAME}")],
         [InlineKeyboardButton(text="⬅️ Back", callback_data="back_main")]
     ])
 
@@ -1213,8 +1221,8 @@ async def callback_about(callback: CallbackQuery):
         "✓ Batch processing\n"
         "✓ Real-time results\n"
         "\n"
-        "**Creator:** @volde_is_back\n"
-        "**Bot:** @UrlDebugger_bot\n"
+        f"**Creator:** @{Config.CONTACT_USERNAME}\n"
+        f"**Bot:** @{Config.BOT_USERNAME}\n"
         "\n"
         "🌟 Built with ❤️ for security researchers"
         + get_footer(),
@@ -1253,7 +1261,7 @@ async def callback_stats(callback: CallbackQuery):
         "\n"
         "┌─ CONFIGURATION ───────────\n"
         "│\n"
-        "│  Bot        ›  @UrlDebugger_bot\n"
+        f"│  Bot        ›  @{Config.BOT_USERNAME}\n"
         f"│  Rate Limit ›  {rate_status}\n"
         f"│  Max URLs   ›  {Config.MAX_URLS_PER_REQUEST}/request\n"
         "│\n"
@@ -1331,12 +1339,61 @@ async def callback_subscription_plans(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("rescan_"))
-async def callback_rescan(callback: CallbackQuery):
-    """Handle rescan button - notify user to use /url command."""
-    await callback.answer(
-        "💡 Use /url <link> to scan again!",
-        show_alert=True
+async def callback_rescan(callback: CallbackQuery, state: FSMContext):
+    """Handle rescan button - rescan the last URLs."""
+    await callback.answer("Rescanning...")
+    
+    # Get stored URLs from state
+    data = await state.get_data()
+    urls = data.get('last_urls', [])
+    
+    if not urls:
+        await callback.message.answer(
+            "╭───────────────────────────╮\n"
+            "│   ℹ️  NO RECENT SCANS     │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "Use /url <link> to scan a URL."
+            + get_footer()
+        )
+        return
+    
+    # Extract index from callback data
+    try:
+        index = int(callback.data.split("_")[1])
+        if 0 <= index < len(urls):
+            url_to_rescan = [urls[index]]
+        else:
+            url_to_rescan = urls
+    except (IndexError, ValueError):
+        url_to_rescan = urls
+    
+    # Process the rescan
+    user_id = callback.from_user.id
+    processing_msg = await callback.message.answer(
+        "╭───────────────────────────╮\n"
+        "│   🔄 RESCANNING           │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        "Please wait..."
     )
+    
+    try:
+        results = await process_urls_async(url_to_rescan, user_id)
+    except Exception as e:
+        logger.error(f"Error in rescan: {str(e)}")
+        results = [f"❌ Error: {str(e)[:100]}"]
+    
+    try:
+        await processing_msg.delete()
+    except:
+        pass
+    
+    # Send results
+    footer = get_footer()
+    for result in results:
+        msg_text = result.rstrip() + footer
+        await callback.message.answer(msg_text)
 
 
 # =============================================================================
@@ -1344,7 +1401,7 @@ async def callback_rescan(callback: CallbackQuery):
 # =============================================================================
 
 @router.message(Command("url"))
-async def cmd_url_check(message: Message, command: CommandObject):
+async def cmd_url_check(message: Message, command: CommandObject, state: FSMContext):
     """Handle /url command to analyze URLs."""
     user_id = message.from_user.id
 
@@ -1507,6 +1564,9 @@ async def cmd_url_check(message: Message, command: CommandObject):
 
     # Send results
     if results:
+        # Save URLs to state for rescan functionality
+        await state.update_data(last_urls=urls)
+        
         # Create header based on number of URLs
         url_count = len(urls)
         url_word = "URL" if url_count == 1 else "URLs"
@@ -1628,7 +1688,7 @@ async def handle_media(message: Message):
 async def main():
     """Main function to start the bot."""
     logger.info("Starting bot with aiogram 3.x...")
-    logger.info(f"Bot username: @UrlDebugger_bot")
+    logger.info(f"Bot username: @{Config.BOT_USERNAME}")
     logger.info(f"Owner ID: {Config.OWNER_USER_ID}")
 
     # Initialize database and migrate from JSON if needed
