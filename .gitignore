@@ -87,3 +87,4 @@ test_singleton_structure.py
 test_integration.py
 test_detection.py
 test_atomic_write.py
+feat_implement.md
