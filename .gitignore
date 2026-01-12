@@ -90,3 +90,4 @@ test_atomic_write.py
 feat_implement.md
 test_scan_history.py
 test_quick_rescan.py
+test_ecommerce_platform.py

@@ -1025,3 +1025,98 @@ def analyze_url_response(
         'payment_form_details': payment_form_details,
         'has_payment_form': payment_form_details.get('has_payment_form', False) if payment_form_details else False,
     }
+
+
+# =============================================================================
+# E-COMMERCE PLATFORM DETECTION
+# =============================================================================
+
+def detect_ecommerce_platform(html: str, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    """
+    Detect e-commerce platform used by the website.
+    
+    This function analyzes HTML content and HTTP headers to identify
+    popular e-commerce platforms like Shopify, WooCommerce, Magento, etc.
+    
+    Args:
+        html: HTML content of the page
+        headers: Optional HTTP response headers dictionary
+        
+    Returns:
+        Dictionary with platform detection results:
+        {
+            'platform': str or None,  # Detected platform name
+            'confidence': float,       # Detection confidence (0.0 - 1.0)
+            'evidence': List[str],     # List of matching patterns/evidence
+            'all_matches': Dict        # All platforms that had matches
+        }
+    """
+    from config import ECOMMERCE_PLATFORMS
+    
+    results = {
+        'platform': None,
+        'confidence': 0.0,
+        'evidence': [],
+        'all_matches': {}
+    }
+    
+    if not html:
+        return results
+    
+    # Prepare headers string for searching
+    headers_str = ""
+    if headers:
+        # Convert headers dict to lowercase string for case-insensitive matching
+        headers_str = str(headers).lower()
+    
+    # Track all platforms with matches
+    platform_scores = {}
+    
+    for platform_name, config in ECOMMERCE_PLATFORMS.items():
+        matches = []
+        match_count = 0
+        
+        # Check HTML patterns
+        for pattern in config['patterns']:
+            try:
+                if re.search(pattern, html, re.IGNORECASE):
+                    matches.append(f"HTML: {pattern}")
+                    match_count += 1
+            except re.error as e:
+                logger.warning(f"Invalid regex pattern for {platform_name}: {pattern} - {e}")
+                continue
+        
+        # Check headers
+        for header_pattern in config.get('headers', []):
+            if header_pattern.lower() in headers_str:
+                matches.append(f"Header: {header_pattern}")
+                match_count += 1
+        
+        # Calculate confidence if matches found
+        if matches:
+            # Base confidence from config, boosted by number of matches
+            # More matches = higher confidence, capped at config max
+            base_confidence = config['confidence']
+            match_boost = min(match_count * 0.05, 0.15)  # Up to +0.15 boost
+            calculated_confidence = min(base_confidence + match_boost, 1.0)
+            
+            platform_scores[platform_name] = {
+                'confidence': calculated_confidence,
+                'evidence': matches[:5],  # Limit to top 5 pieces of evidence
+                'match_count': match_count
+            }
+    
+    # Find platform with highest confidence
+    if platform_scores:
+        # Sort by confidence, then by match count as tiebreaker
+        best_platform = max(
+            platform_scores.items(),
+            key=lambda x: (x[1]['confidence'], x[1]['match_count'])
+        )
+        
+        results['platform'] = best_platform[0]
+        results['confidence'] = best_platform[1]['confidence']
+        results['evidence'] = best_platform[1]['evidence']
+        results['all_matches'] = platform_scores
+    
+    return results

@@ -210,7 +210,8 @@ def format_url_result(
     cloudflare: bool,
     payment_security_type: str,
     cvv_cvc_status: str,
-    inbuilt_status: str
+    inbuilt_status: str,
+    ecommerce_platform: str = "None detected"
 ) -> str:
     """
     Format the URL check result into a readable message.
@@ -227,6 +228,7 @@ def format_url_result(
         payment_security_type: Type of payment security
         cvv_cvc_status: CVV/CVC requirement status
         inbuilt_status: Inbuilt payment system status
+        ecommerce_platform: Detected e-commerce platform name
 
     Returns:
         str: Formatted result string (plain text, no Markdown)
@@ -296,6 +298,12 @@ def format_url_result(
         captcha_display = "🤖 Detected"
     else:
         captcha_display = "⚪ None"
+    
+    # E-commerce platform formatting
+    if ecommerce_platform and ecommerce_platform != "None detected":
+        platform_display = f"🛒 {ecommerce_platform}"
+    else:
+        platform_display = "⚪ None detected"
 
     return (
         f"╭─ SCAN RESULT ─────────────╮\n"
@@ -306,6 +314,12 @@ def format_url_result(
         f"┌─ 💳 GATEWAYS ─────────────\n"
         f"│\n"
         f"│  {gateways_str}\n"
+        f"│\n"
+        f"└────────────────────────────\n"
+        f"\n"
+        f"┌─ 🛒 PLATFORM ──────────────\n"
+        f"│\n"
+        f"│  {platform_display}\n"
         f"│\n"
         f"└────────────────────────────\n"
         f"\n"

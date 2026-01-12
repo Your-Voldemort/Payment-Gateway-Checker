@@ -664,3 +664,138 @@ INBUILT_PAYMENT_KEYWORDS = [
     'secure payment on this site', 'on-site payment',
     'internal payment gateway'
 ]
+
+# =============================================================================
+# E-COMMERCE PLATFORM DETECTION
+# =============================================================================
+# Patterns to identify popular e-commerce platforms used by websites.
+# Each platform has HTML/JS patterns and HTTP headers for detection.
+# =============================================================================
+
+ECOMMERCE_PLATFORMS = {
+    "Shopify": {
+        "patterns": [
+            r"cdn\.shopify\.com", r"myshopify\.com", r"Shopify\.theme",
+            r"shopify-section", r"shopify\.com/s/files",
+            r"window\.Shopify", r"Shopify\.shop", r"shopify-buy",
+            r"shopify-payment-button", r"shopifycdn\.com"
+        ],
+        "headers": ["x-shopify-stage", "x-shopid", "x-shopify-request-id"],
+        "confidence": 0.95
+    },
+    "WooCommerce": {
+        "patterns": [
+            r"woocommerce", r"wc-block", r"wc-add-to-cart",
+            r"wp-content/plugins/woocommerce", r"wc_add_to_cart_params",
+            r"woocommerce-product", r"wc-cart-fragments", r"woocommerce-page",
+            r"woocommerce\.css", r"woocommerce\.js"
+        ],
+        "headers": [],
+        "confidence": 0.90
+    },
+    "Magento": {
+        "patterns": [
+            r"Magento", r"mage/", r"requirejs/require",
+            r"static/version", r"skin/frontend", r"Mage\.Cookies",
+            r"varien/", r"magento2", r"magento\.com",
+            r"mage-error", r"magento_root"
+        ],
+        "headers": ["x-magento-", "x-magento-cache"],
+        "confidence": 0.90
+    },
+    "BigCommerce": {
+        "patterns": [
+            r"bigcommerce\.com", r"cdn\.bcapp", r"stencil-utils",
+            r"data-product-id", r"BCData", r"bigcommerce-logo",
+            r"bigcommerce\.net", r"bc-sf-filter"
+        ],
+        "headers": ["x-bc-", "x-bc-store-hash"],
+        "confidence": 0.90
+    },
+    "PrestaShop": {
+        "patterns": [
+            r"prestashop", r"presta", r"modules/ps_",
+            r"js/jquery/plugins/", r"PrestaShop", r"prestashop\.com",
+            r"ps-shoppingcart", r"prestashop-version"
+        ],
+        "headers": [],
+        "confidence": 0.85
+    },
+    "OpenCart": {
+        "patterns": [
+            r"catalog/view/javascript", r"route=product",
+            r"index\.php\?route=", r"opencart", r"opencart\.com",
+            r"product_id=", r"catalog/view/theme"
+        ],
+        "headers": [],
+        "confidence": 0.85
+    },
+    "Squarespace": {
+        "patterns": [
+            r"squarespace\.com", r"static\.squarespace",
+            r"sqsp-", r"sqs-block", r"squarespace-cdn",
+            r"sqs-system", r"squarespace\.net"
+        ],
+        "headers": ["x-servedby: squarespace", "x-contextid"],
+        "confidence": 0.95
+    },
+    "Wix": {
+        "patterns": [
+            r"wix\.com", r"wixstatic\.com", r"_wix_browser_sess",
+            r"wix-code-sdk", r"wixWindow", r"wix-ui",
+            r"parastorage\.com", r"wixapps\.net"
+        ],
+        "headers": ["x-wix-", "x-wix-request-id"],
+        "confidence": 0.95
+    },
+    "WordPress": {
+        "patterns": [
+            r"wp-content", r"wp-includes", r"wordpress",
+            r"wp-json", r"wp-admin", r"wp-login",
+            r"wp_", r"_wpnonce"
+        ],
+        "headers": ["x-powered-by: wordpress"],
+        "confidence": 0.85
+    },
+    "Salesforce Commerce Cloud": {
+        "patterns": [
+            r"demandware", r"salesforce commerce cloud",
+            r"dwanalytics", r"dw\.ac", r"dwre",
+            r"demandware\.edgesuite\.net", r"dw-session"
+        ],
+        "headers": ["x-dw-request-id"],
+        "confidence": 0.90
+    },
+    "Ecwid": {
+        "patterns": [
+            r"ecwid", r"ecwid\.com", r"ecwid-store",
+            r"ec-store", r"ecwid-script", r"ecwidstores"
+        ],
+        "headers": [],
+        "confidence": 0.90
+    },
+    "Webflow": {
+        "patterns": [
+            r"webflow", r"webflow\.com", r"webflow\.io",
+            r"w-webflow", r"wf-page", r"webflowcdn"
+        ],
+        "headers": ["x-wf-"],
+        "confidence": 0.90
+    },
+    "Volusion": {
+        "patterns": [
+            r"volusion", r"volusion\.com", r"vspfiles",
+            r"volusion-", r"volution"
+        ],
+        "headers": [],
+        "confidence": 0.85
+    },
+    "Shift4Shop": {
+        "patterns": [
+            r"3dcart", r"shift4shop", r"3dcartstores",
+            r"shift4shop\.com"
+        ],
+        "headers": [],
+        "confidence": 0.85
+    }
+}

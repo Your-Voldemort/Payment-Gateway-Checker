@@ -4,7 +4,7 @@ import asyncio
 from typing import Tuple, List
 from config import Config
 from utils import is_valid_url
-from detection import analyze_url_response
+from detection import analyze_url_response, detect_ecommerce_platform
 from user_agents import get_random_user_agent
 from cache_manager import get_cached_result, save_to_cache
 from logger import setup_logger
@@ -22,9 +22,9 @@ async def check_url(
     session: aiohttp.ClientSession = None,
     retry_count: int = 0,
     use_cache: bool = True
-) -> Tuple[List[str], int, bool, bool, str, str, str]:
+) -> Tuple[List[str], int, bool, bool, str, str, str, str]:
     """
-    Check the provided URL for payment gateways, security features, and IP info.
+    Check the provided URL for payment gateways, security features, and e-commerce platform.
     Includes automatic retry logic for transient failures (5xx errors, timeouts, connection errors).
     Supports result caching to reduce duplicate checks.
 
@@ -43,10 +43,11 @@ async def check_url(
             - Payment security type description
             - CVV/CVC requirement status
             - Inbuilt payment system status
+            - E-commerce platform name (or "None detected")
     """
     if not is_valid_url(url):
         logger.warning(f"Invalid URL provided: {url}")
-        return [], 400, False, False, "Invalid URL", "N/A", "N/A"
+        return [], 400, False, False, "Invalid URL", "N/A", "N/A", "None detected", "None detected"
 
     # Check cache first (only on first attempt, not retries)
     if use_cache and retry_count == 0:
@@ -60,7 +61,8 @@ async def check_url(
                 cached['cloudflare'],
                 cached['security_type'],
                 cached['cvv_status'],
-                cached['inbuilt_status']
+                cached['inbuilt_status'],
+                cached.get('ecommerce_platform', 'None detected')  # Backward compatibility
             )
 
     # Use rotating user agent to minimize rate limiting
@@ -103,6 +105,20 @@ async def check_url(
                 headers=dict(response.headers),
                 status_code=response.status
             )
+            
+            # Detect e-commerce platform
+            platform_detection = detect_ecommerce_platform(
+                html=text,
+                headers=dict(response.headers)
+            )
+            
+            # Get platform name or "None detected"
+            platform_name = platform_detection['platform'] if platform_detection['platform'] else "None detected"
+            
+            # Log platform detection
+            if platform_detection['platform']:
+                logger.info(f"Detected e-commerce platform for {url}: {platform_name} "
+                           f"(confidence: {platform_detection['confidence']:.0%})")
 
             logger.info(f"Successfully checked {url} - Status: {response.status}, "
                        f"Gateways: {len(analysis['gateways'])} "
@@ -117,7 +133,8 @@ async def check_url(
                     'cloudflare': analysis['cloudflare'],
                     'security_type': analysis['security_type'],
                     'cvv_status': analysis['cvv_status'],
-                    'inbuilt_status': analysis['inbuilt_status']
+                    'inbuilt_status': analysis['inbuilt_status'],
+                    'ecommerce_platform': platform_name
                 }
                 await save_to_cache(url, cache_data)
 
@@ -128,7 +145,8 @@ async def check_url(
                 analysis['cloudflare'],
                 analysis['security_type'],
                 analysis['cvv_status'],
-                analysis['inbuilt_status']
+                analysis['inbuilt_status'],
+                platform_name
             )
 
     except aiohttp.ClientResponseError as http_err:
@@ -138,9 +156,9 @@ async def check_url(
         if 400 <= status_code < 500:
             logger.error(f"HTTP client error for {url}: {status_code}")
             if status_code == 403:
-                return [], 403, False, False, "403 Forbidden: Access Denied", "N/A", "N/A"
+                return [], 403, False, False, "403 Forbidden: Access Denied", "N/A", "N/A", "None detected"
             else:
-                return [], status_code, False, False, f"HTTP Error: {status_code}", "N/A", "N/A"
+                return [], status_code, False, False, f"HTTP Error: {status_code}", "N/A", "N/A", "None detected"
 
         # Retry server errors (5xx) - these are often transient
         if retry_count < MAX_RETRIES:
@@ -150,7 +168,7 @@ async def check_url(
             return await check_url(url, session, retry_count + 1, use_cache)
 
         logger.error(f"HTTP error for {url} after {MAX_RETRIES} retries: {status_code}")
-        return [], status_code, False, False, f"HTTP Error: {status_code}", "N/A", "N/A"
+        return [], status_code, False, False, f"HTTP Error: {status_code}", "N/A", "N/A", "None detected"
 
     except aiohttp.ServerTimeoutError:
         # Retry timeouts - could be temporary network congestion
@@ -161,7 +179,7 @@ async def check_url(
             return await check_url(url, session, retry_count + 1, use_cache)
 
         logger.error(f"Timeout for {url} after {MAX_RETRIES} retries")
-        return [], 408, False, False, "Request Timeout", "N/A", "N/A"
+        return [], 408, False, False, "Request Timeout", "N/A", "N/A", "None detected"
 
     except aiohttp.ClientConnectionError as conn_err:
         # Retry connection errors - network issues are often temporary
@@ -172,11 +190,11 @@ async def check_url(
             return await check_url(url, session, retry_count + 1, use_cache)
 
         logger.error(f"Connection error for {url} after {MAX_RETRIES} retries: {str(conn_err)}")
-        return [], 503, False, False, "Connection Error", "N/A", "N/A"
+        return [], 503, False, False, "Connection Error", "N/A", "N/A", "None detected"
 
     except Exception as e:
         logger.error(f"Unexpected error checking {url}: {str(e)}")
-        return [], 500, False, False, f"Error: {str(e)}", "N/A", "N/A"
+        return [], 500, False, False, f"Error: {str(e)}", "N/A", "N/A", "None detected"
     
     finally:
         # Close session if we created it

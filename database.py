@@ -59,9 +59,20 @@ class Database:
                     cloudflare BOOLEAN,
                     captcha BOOLEAN,
                     inbuilt_payment BOOLEAN,
+                    ecommerce_platform TEXT,
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
                 )
             """)
+            
+            # Add ecommerce_platform column if it doesn't exist (migration)
+            try:
+                await db.execute("""
+                    ALTER TABLE scan_history ADD COLUMN ecommerce_platform TEXT
+                """)
+                logger.info("Added ecommerce_platform column to scan_history table")
+            except Exception as e:
+                # Column already exists or other error - safe to ignore
+                pass
             
             # Rate limiter persistence table
             await db.execute("""
@@ -392,25 +403,26 @@ async def save_scan_result(
     cvv_status: str,
     cloudflare: bool,
     captcha: bool,
-    inbuilt_payment: bool
+    inbuilt_payment: bool,
+    ecommerce_platform: str = "None detected"
 ) -> bool:
     """Save scan result to history."""
     db = await get_database()
-    
+
     try:
         async with db.get_connection() as conn:
             import json
-            
+
             await conn.execute("""
                 INSERT INTO scan_history (
                     user_id, url, scanned_at, status_code,
                     gateways_detected, security_type, cvv_status,
-                    cloudflare, captcha, inbuilt_payment
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    cloudflare, captcha, inbuilt_payment, ecommerce_platform
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 user_id, url, datetime.now().isoformat(), status_code,
                 json.dumps(gateways), security_type, cvv_status,
-                cloudflare, captcha, inbuilt_payment
+                cloudflare, captcha, inbuilt_payment, ecommerce_platform
             ))
             
             # Update gateway statistics
