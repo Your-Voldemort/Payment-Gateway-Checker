@@ -471,6 +471,76 @@ async def get_user_scan_history(user_id: int, limit: int = 10) -> List[Dict[str,
         return []
 
 
+async def get_user_scan_history_paginated(
+    user_id: int, 
+    page: int = 1, 
+    per_page: int = 5,
+    gateway_filter: str = None
+) -> Tuple[List[Dict[str, Any]], int]:
+    """
+    Get paginated scan history for a user.
+    
+    Args:
+        user_id: User ID to get history for
+        page: Page number (1-indexed)
+        per_page: Number of results per page
+        gateway_filter: Optional gateway name to filter by
+        
+    Returns:
+        Tuple of (results list, total count)
+    """
+    db = await get_database()
+    
+    try:
+        async with db.get_connection() as conn:
+            import json
+            
+            # Build query with optional filter
+            base_query = "FROM scan_history WHERE user_id = ?"
+            params = [user_id]
+            
+            if gateway_filter:
+                base_query += " AND gateways_detected LIKE ?"
+                params.append(f"%{gateway_filter}%")
+            
+            # Get total count
+            cursor = await conn.execute(
+                f"SELECT COUNT(*) {base_query}", params
+            )
+            total = (await cursor.fetchone())[0]
+            
+            # Get paginated results
+            offset = (page - 1) * per_page
+            cursor = await conn.execute(f"""
+                SELECT url, scanned_at, status_code, gateways_detected,
+                       security_type, cvv_status, cloudflare, captcha
+                {base_query}
+                ORDER BY scanned_at DESC
+                LIMIT ? OFFSET ?
+            """, params + [per_page, offset])
+            
+            rows = await cursor.fetchall()
+            
+            results = []
+            for row in rows:
+                results.append({
+                    'url': row[0],
+                    'scanned_at': row[1],
+                    'status_code': row[2],
+                    'gateways': json.loads(row[3]),
+                    'security_type': row[4],
+                    'cvv_status': row[5],
+                    'cloudflare': bool(row[6]),
+                    'captcha': bool(row[7])
+                })
+            
+            return results, total
+            
+    except Exception as e:
+        logger.error(f"Error getting paginated scan history: {e}")
+        return [], 0
+
+
 async def get_gateway_statistics(gateway_name: str = None) -> Dict[str, Any]:
     """Get detection statistics for gateways."""
     db = await get_database()

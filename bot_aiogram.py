@@ -209,6 +209,7 @@ async def cmd_help(message: Message):
         "│  /register  ─  Activate access\n"
         "│  /help      ─  This guide\n"
         "│  /url <link> ─  Scan website\n"
+        "│  /history   ─  View scan history\n"
         "│  /stats     ─  Bot statistics ⚡\n"
         "│  /auditlog  ─  Admin action log ⚡\n"
         "│  /broadcast ─  Announcement ⚡\n"
@@ -745,6 +746,91 @@ async def cmd_addsub(message: Message):
 
 
 
+@router.message(Command("history"))
+async def cmd_history(message: Message):
+    """Handle /history command - view scan history."""
+    user_id = message.from_user.id
+    
+    # Check registration
+    if not await async_is_user_registered(user_id):
+        await message.answer(
+            "⚠️ Please /register first."
+            + get_footer()
+        )
+        return
+    
+    # Import the pagination function
+    from database import get_user_scan_history_paginated
+    
+    # Get history with pagination (page 1, 5 per page)
+    history, total = await get_user_scan_history_paginated(user_id, page=1, per_page=5)
+    
+    if not history:
+        await message.answer(
+            "╭───────────────────────────╮\n"
+            "│   📭  NO HISTORY          │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "You haven't scanned any URLs yet.\n"
+            "\n"
+            "Use /url <link> to scan a website!"
+            + get_footer()
+        )
+        return
+    
+    # Format response
+    response = (
+        "╭───────────────────────────╮\n"
+        "│   📋  SCAN HISTORY        │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        f"Total Scans: {total}\n"
+        f"Page: 1 of {(total + 4) // 5}\n"
+        "\n"
+    )
+    
+    for i, scan in enumerate(history, 1):
+        # Format URL (truncate if too long)
+        url_display = scan['url'][:35] + "..." if len(scan['url']) > 35 else scan['url']
+        
+        # Format date
+        try:
+            scan_date = datetime.fromisoformat(scan['scanned_at'])
+            date_str = scan_date.strftime("%m/%d %H:%M")
+        except:
+            date_str = "N/A"
+        
+        # Format gateways (show first 3)
+        gateways = scan.get('gateways', [])
+        if gateways:
+            gateway_str = ", ".join(gateways[:3])
+            if len(gateways) > 3:
+                gateway_str += f" +{len(gateways) - 3}"
+        else:
+            gateway_str = "None"
+        
+        response += f"{i}. {url_display}\n"
+        response += f"   📅 {date_str}\n"
+        response += f"   💳 {gateway_str}\n\n"
+    
+    # Add pagination buttons if needed
+    total_pages = (total + 4) // 5
+    
+    keyboard_buttons = []
+    
+    if total_pages > 1:
+        nav_buttons = []
+        if total_pages > 1:
+            nav_buttons.append(InlineKeyboardButton(text="▶️ Next", callback_data="history_page_2"))
+        keyboard_buttons.append(nav_buttons)
+    
+    keyboard_buttons.append([InlineKeyboardButton(text="🔙 Menu", callback_data="back_main")])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    await message.answer(response + get_footer(), reply_markup=keyboard)
+
+
 @router.message(Command("cancel"))
 async def cmd_cancel(message: Message, state: FSMContext):
     """Cancel any ongoing operation."""
@@ -1274,6 +1360,91 @@ async def callback_payment_info(callback: CallbackQuery):
         reply_markup=keyboard,
         parse_mode="Markdown"
     )
+
+
+@router.callback_query(F.data.startswith("history_page_"))
+async def callback_history_page(callback: CallbackQuery):
+    """Handle history pagination."""
+    await callback.answer()
+    
+    user_id = callback.from_user.id
+    
+    # Extract page number from callback data
+    try:
+        page = int(callback.data.split("_")[-1])
+    except (ValueError, IndexError):
+        page = 1
+    
+    # Import the pagination function
+    from database import get_user_scan_history_paginated
+    
+    # Get history for the requested page
+    history, total = await get_user_scan_history_paginated(user_id, page=page, per_page=5)
+    
+    if not history:
+        await callback.answer("No history found", show_alert=True)
+        return
+    
+    # Format response
+    total_pages = (total + 4) // 5
+    
+    response = (
+        "╭───────────────────────────╮\n"
+        "│   📋  SCAN HISTORY        │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        f"Total Scans: {total}\n"
+        f"Page: {page} of {total_pages}\n"
+        "\n"
+    )
+    
+    for i, scan in enumerate(history, 1):
+        # Calculate global index
+        global_index = (page - 1) * 5 + i
+        
+        # Format URL (truncate if too long)
+        url_display = scan['url'][:35] + "..." if len(scan['url']) > 35 else scan['url']
+        
+        # Format date
+        try:
+            scan_date = datetime.fromisoformat(scan['scanned_at'])
+            date_str = scan_date.strftime("%m/%d %H:%M")
+        except:
+            date_str = "N/A"
+        
+        # Format gateways (show first 3)
+        gateways = scan.get('gateways', [])
+        if gateways:
+            gateway_str = ", ".join(gateways[:3])
+            if len(gateways) > 3:
+                gateway_str += f" +{len(gateways) - 3}"
+        else:
+            gateway_str = "None"
+        
+        response += f"{global_index}. {url_display}\n"
+        response += f"   📅 {date_str}\n"
+        response += f"   💳 {gateway_str}\n\n"
+    
+    # Add pagination buttons
+    keyboard_buttons = []
+    
+    if total_pages > 1:
+        nav_buttons = []
+        
+        if page > 1:
+            nav_buttons.append(InlineKeyboardButton(text="◀️ Prev", callback_data=f"history_page_{page-1}"))
+        
+        if page < total_pages:
+            nav_buttons.append(InlineKeyboardButton(text="▶️ Next", callback_data=f"history_page_{page+1}"))
+        
+        if nav_buttons:
+            keyboard_buttons.append(nav_buttons)
+    
+    keyboard_buttons.append([InlineKeyboardButton(text="🔙 Menu", callback_data="back_main")])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    await callback.message.edit_text(response + get_footer(), reply_markup=keyboard)
 
 
 @router.callback_query(F.data == "help")
