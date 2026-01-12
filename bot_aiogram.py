@@ -1538,6 +1538,7 @@ async def callback_help_scan(callback: CallbackQuery):
         "• Target checkout pages\n"
         "• No protocol needed\n"
         f"• Max {Config.MAX_URLS_PER_REQUEST} URLs per scan\n"
+        "• Use 🔄 Quick Rescan button to rescan\n"
         "\n"
         "**What We Detect:**\n"
         "💳 400+ Payment Gateways\n"
@@ -1825,6 +1826,88 @@ async def callback_rescan(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer(msg_text)
 
 
+@router.callback_query(F.data.startswith("quick_rescan_"))
+async def callback_quick_rescan(callback: CallbackQuery, state: FSMContext):
+    """Handle Quick Rescan button - rescan a specific URL from results."""
+    await callback.answer("🔄 Rescanning...")
+    
+    # Get stored URLs from state
+    data = await state.get_data()
+    urls = data.get('last_urls', [])
+    
+    if not urls:
+        await callback.message.answer(
+            "╭───────────────────────────╮\n"
+            "│   ℹ️  NO RECENT SCANS     │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "Use /url <link> to scan a URL."
+            + get_footer()
+        )
+        return
+    
+    # Extract index from callback data (format: quick_rescan_0, quick_rescan_1, etc.)
+    try:
+        index = int(callback.data.split("_")[2])
+        if 0 <= index < len(urls):
+            url_to_rescan = urls[index]
+        else:
+            await callback.answer("❌ URL not found", show_alert=True)
+            return
+    except (IndexError, ValueError) as e:
+        logger.error(f"Error parsing quick rescan index: {e}")
+        await callback.answer("❌ Invalid rescan request", show_alert=True)
+        return
+    
+    # Log the rescan
+    user_id = callback.from_user.id
+    logger.info(f"User {user_id} quick rescanning URL: {url_to_rescan}")
+    
+    # Show rescanning message
+    processing_msg = await callback.message.answer(
+        "╭───────────────────────────╮\n"
+        "│   🔄 QUICK RESCAN         │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        f"Rescanning URL...\n"
+        "\n"
+        "Please wait..."
+    )
+    
+    # Process the rescan (single URL)
+    try:
+        results = await process_urls_async([url_to_rescan], user_id, processing_msg)
+    except Exception as e:
+        logger.error(f"Error in quick rescan: {str(e)}")
+        results = [
+            "╭───────────────────────────╮\n"
+            "│   ❌  RESCAN FAILED       │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            f"Error: {str(e)[:100]}\n"
+            "\n"
+            "Please try again."
+        ]
+    
+    # Delete processing message
+    try:
+        await processing_msg.delete()
+    except:
+        pass
+    
+    # Send result with Quick Rescan button
+    footer = get_footer()
+    for i, result in enumerate(results):
+        msg_text = result.rstrip() + footer
+        
+        # Add Quick Rescan button for the result
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Quick Rescan", callback_data=f"quick_rescan_{index}")]
+        ])
+        
+        await callback.message.answer(msg_text, reply_markup=keyboard)
+
+
 # =============================================================================
 # URL PROCESSING HANDLER
 # =============================================================================
@@ -2052,13 +2135,19 @@ async def cmd_url_check(message: Message, command: CommandObject, state: FSMCont
         # Send header first
         await message.answer(header)
 
-        # Send each result as a separate message
+        # Send each result as a separate message with Quick Rescan button
         footer = get_footer()
-        for result in results:
+        for i, result in enumerate(results):
             # Combine result with footer
             # result typically ends with newlines, so strip one set of newlines if needed
             msg_text = result.rstrip() + footer
-            await message.answer(msg_text)
+            
+            # Add Quick Rescan button for each result
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Quick Rescan", callback_data=f"quick_rescan_{i}")]
+            ])
+            
+            await message.answer(msg_text, reply_markup=keyboard)
 
 
 async def process_urls_async(
