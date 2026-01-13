@@ -35,6 +35,7 @@ from utils import format_url_result, normalize_url
 from http_client import get_http_session, close_http_client
 from security import sanitize_url, sanitize_text_input, validate_duration
 from audit_log import log_admin_action, get_audit_logs, get_audit_log_stats
+from progress_tracker import ScanProgress
 
 # Initialize logger
 logger = setup_logger()
@@ -1538,12 +1539,15 @@ async def callback_help_scan(callback: CallbackQuery):
         "• Target checkout pages\n"
         "• No protocol needed\n"
         f"• Max {Config.MAX_URLS_PER_REQUEST} URLs per scan\n"
+        "• Real-time progress with ETA\n"
         "• Use 🔄 Quick Rescan button to rescan\n"
         "\n"
         "**What We Detect:**\n"
         "💳 400+ Payment Gateways\n"
         "🔐 Security Features\n"
-        "🛡️ Protection Systems"
+        "🛡️ Protection Systems\n"
+        "🛒 E-commerce Platforms\n"
+        "🛡️ Cart Abandonment Tools"
         + get_footer(),
         reply_markup=keyboard,
         parse_mode="Markdown"
@@ -2180,7 +2184,10 @@ async def process_urls_async(
 
     # Execute all checks concurrently with progress updates
     if progress_message and total > 2:
-        # For multiple URLs, show progress
+        # For multiple URLs, show progress with ETA
+        progress = ScanProgress(total_urls=total)
+        progress.start()
+        
         completed = 0
         pending_tasks = {asyncio.create_task(task): url for task, url in zip(tasks, urls)}
         responses = [None] * total  # Preserve order
@@ -2199,20 +2206,12 @@ async def process_urls_async(
                 del pending_tasks[task]
                 completed += 1
                 
-                # Update progress
+                # Update progress tracker
+                progress.update(current_url=url)
+                
+                # Update progress message
                 try:
-                    progress_bar = "█" * completed + "░" * (total - completed)
-                    current_url = url[:30] + "..." if len(url) > 30 else url
-                    await progress_message.edit_text(
-                        "╭───────────────────────────╮\n"
-                        "│   ⏳  SCANNING            │\n"
-                        "╰───────────────────────────╯\n"
-                        "\n"
-                        f"Progress: {completed}/{total}\n"
-                        f"{progress_bar}\n"
-                        "\n"
-                        f"Current: {current_url}"
-                    )
+                    await progress_message.edit_text(progress.format_status_boxed(include_current=True))
                 except Exception as e:
                     logger.debug(f"Could not update progress message: {e}")
                     pass  # Ignore edit errors (e.g., message too old)
