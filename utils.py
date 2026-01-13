@@ -211,7 +211,8 @@ def format_url_result(
     payment_security_type: str,
     cvv_cvc_status: str,
     inbuilt_status: str,
-    ecommerce_platform: str = "None detected"
+    ecommerce_platform: str = "None detected",
+    cart_abandonment: str = "None detected"
 ) -> str:
     """
     Format the URL check result into a readable message.
@@ -229,6 +230,7 @@ def format_url_result(
         cvv_cvc_status: CVV/CVC requirement status
         inbuilt_status: Inbuilt payment system status
         ecommerce_platform: Detected e-commerce platform name
+        cart_abandonment: Detected cart abandonment tools summary
 
     Returns:
         str: Formatted result string (plain text, no Markdown)
@@ -304,6 +306,14 @@ def format_url_result(
         platform_display = f"🛒 {ecommerce_platform}"
     else:
         platform_display = "⚪ None detected"
+    
+    # Cart abandonment tools formatting
+    if cart_abandonment and cart_abandonment != "None detected":
+        # Truncate if too long
+        cart_display = cart_abandonment if len(cart_abandonment) <= 40 else cart_abandonment[:37] + "..."
+        cart_display = f"🛡️ {cart_display}"
+    else:
+        cart_display = "⚪ None detected"
 
     return (
         f"╭─ SCAN RESULT ─────────────╮\n"
@@ -311,7 +321,7 @@ def format_url_result(
         f"│  {status_display}\n"
         f"╰───────────────────────────╯\n"
         f"\n"
-        f"┌─ 💳 GATEWAYS ─────────────\n"
+        f"┌─ 💳 GATEWAYS ──────────────\n"
         f"│\n"
         f"│  {gateways_str}\n"
         f"│\n"
@@ -320,6 +330,12 @@ def format_url_result(
         f"┌─ 🛒 PLATFORM ──────────────\n"
         f"│\n"
         f"│  {platform_display}\n"
+        f"│\n"
+        f"└────────────────────────────\n"
+        f"\n"
+        f"┌─ 🛡️ CART PROTECTION ───────\n"
+        f"│\n"
+        f"│  {cart_display}\n"
         f"│\n"
         f"└────────────────────────────\n"
         f"\n"

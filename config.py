@@ -799,3 +799,127 @@ ECOMMERCE_PLATFORMS = {
         "confidence": 0.85
     }
 }
+
+# Cart Abandonment and Recovery Tools Detection
+CART_ABANDONMENT_TOOLS = {
+    "Klaviyo": {
+        "patterns": [
+            r"klaviyo\.com", r"static\.klaviyo\.com", r"_learnq",
+            r"klaviyo-form", r"kl_", r"klaviyo\.push"
+        ],
+        "type": "email_marketing",
+        "confidence": 0.90
+    },
+    "CartHook": {
+        "patterns": [
+            r"carthook\.com", r"carthook", r"ch_",
+            r"carthook-checkout"
+        ],
+        "type": "post_purchase",
+        "confidence": 0.85
+    },
+    "Privy": {
+        "patterns": [
+            r"privy\.com", r"widget\.privy\.com", r"privy-popup",
+            r"privy-widget", r"_privy_"
+        ],
+        "type": "popup_conversion",
+        "confidence": 0.85
+    },
+    "OptinMonster": {
+        "patterns": [
+            r"optinmonster\.com", r"optmnstr", r"om-",
+            r"omapi", r"optinmonster"
+        ],
+        "type": "lead_capture",
+        "confidence": 0.85
+    },
+    "Drip": {
+        "patterns": [
+            r"getdrip\.com", r"dc\.js", r"_dcq",
+            r"drip\.com", r"drip-widget"
+        ],
+        "type": "email_automation",
+        "confidence": 0.85
+    },
+    "Rejoiner": {
+        "patterns": [
+            r"rejoiner\.com", r"rj\.js", r"rejoiner",
+            r"rj-track"
+        ],
+        "type": "cart_recovery",
+        "confidence": 0.85
+    },
+    "Jilt": {
+        "patterns": [
+            r"jilt\.com", r"jilt", r"jilt-widget",
+            r"jiltcdn"
+        ],
+        "type": "cart_recovery",
+        "confidence": 0.80
+    },
+    "Barilliance": {
+        "patterns": [
+            r"barilliance\.com", r"barilliance", r"brcdn",
+            r"brl-cdn"
+        ],
+        "type": "personalization",
+        "confidence": 0.80
+    },
+    "SaleCycle": {
+        "patterns": [
+            r"salecycle\.com", r"salecycle", r"sc-static",
+            r"salecycleapi"
+        ],
+        "type": "behavioral_marketing",
+        "confidence": 0.80
+    },
+    "CartStack": {
+        "patterns": [
+            r"cartstack\.com", r"cartstack", r"cs-static",
+            r"cartstackcdn"
+        ],
+        "type": "cart_recovery",
+        "confidence": 0.80
+    },
+    "Omnisend": {
+        "patterns": [
+            r"omnisend\.com", r"omnisend", r"omni-",
+            r"omnisendcdn"
+        ],
+        "type": "email_marketing",
+        "confidence": 0.85
+    },
+    "ActiveCampaign": {
+        "patterns": [
+            r"activecampaign\.com", r"active-campaign", r"vgo",
+            r"trackcmp\.net"
+        ],
+        "type": "email_automation",
+        "confidence": 0.85
+    },
+    "Listrak": {
+        "patterns": [
+            r"listrak\.com", r"listrak", r"ltktracker",
+            r"listrakbi"
+        ],
+        "type": "cart_recovery",
+        "confidence": 0.80
+    },
+    "Yotpo": {
+        "patterns": [
+            r"yotpo\.com", r"yotpo", r"yotpo-widget",
+            r"staticw2\.yotpo"
+        ],
+        "type": "reviews_loyalty",
+        "confidence": 0.85
+    },
+    "Smile.io": {
+        "patterns": [
+            r"smile\.io", r"smile-ui", r"sweettooth",
+            r"sweet-tooth"
+        ],
+        "type": "loyalty_rewards",
+        "confidence": 0.80
+    }
+}

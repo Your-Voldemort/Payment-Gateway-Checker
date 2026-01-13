@@ -1120,3 +1120,78 @@ def detect_ecommerce_platform(html: str, headers: Optional[Dict[str, str]] = Non
         results['all_matches'] = platform_scores
     
     return results
+
+
+def detect_cart_abandonment_tools(html: str, headers: dict = None) -> dict:
+    """
+    Detect cart abandonment and recovery tools.
+    
+    Args:
+        html: The HTML content of the page
+        headers: Optional response headers dictionary
+        
+    Returns:
+        Dictionary containing detection results with keys:
+        - tools: List of detected tool names
+        - details: List of dicts with tool details (name, type, confidence)
+        - summary: String summary of detected tools
+    """
+    from config import CART_ABANDONMENT_TOOLS
+    
+    results = {
+        'tools': [],
+        'details': [],
+        'summary': 'None detected'
+    }
+    
+    if not html:
+        return results
+    
+    html_lower = html.lower()
+    headers_str = str(headers).lower() if headers else ""
+    
+    detected_tools = []
+    
+    for tool_name, config in CART_ABANDONMENT_TOOLS.items():
+        matches = []
+        
+        # Check HTML patterns using word boundaries for accuracy
+        for pattern in config['patterns']:
+            if re.search(pattern, html, re.IGNORECASE):
+                matches.append(f"Pattern: {pattern}")
+        
+        # Check headers if available
+        if headers and 'headers' in config:
+            for header_pattern in config.get('headers', []):
+                if header_pattern.lower() in headers_str:
+                    matches.append(f"Header: {header_pattern}")
+        
+        # If we found matches, add to results
+        if matches:
+            confidence = config.get('confidence', 0.80)
+            # Boost confidence for multiple matches
+            if len(matches) > 1:
+                confidence = min(0.98, confidence + (len(matches) * 0.05))
+            
+            tool_info = {
+                'name': tool_name,
+                'type': config['type'],
+                'confidence': confidence,
+                'evidence': matches[:3]  # Keep top 3 evidence items
+            }
+            
+            detected_tools.append(tool_info)
+            results['tools'].append(tool_name)
+    
+    # Sort by confidence
+    detected_tools.sort(key=lambda x: x['confidence'], reverse=True)
+    results['details'] = detected_tools
+    
+    # Create summary
+    if detected_tools:
+        tool_names = [tool['name'] for tool in detected_tools[:5]]  # Top 5
+        results['summary'] = ', '.join(tool_names)
+        if len(detected_tools) > 5:
+            results['summary'] += f' (+{len(detected_tools) - 5} more)'
+    
+    return results

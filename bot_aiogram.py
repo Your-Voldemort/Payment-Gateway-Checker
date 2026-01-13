@@ -2240,10 +2240,10 @@ async def process_urls_async(
                     "└────────────────────────────\n\n"
                 )
             else:
-                detected_gateways, status_code, captcha, cloudflare, payment_security_type, cvv_cvc_status, inbuilt_status, ecommerce_platform = response
+                detected_gateways, status_code, captcha, cloudflare, payment_security_type, cvv_cvc_status, inbuilt_status, ecommerce_platform, cart_abandonment = response
                 result_line = format_url_result(
                     url, detected_gateways, status_code, captcha,
-                    cloudflare, payment_security_type, cvv_cvc_status, inbuilt_status, ecommerce_platform
+                    cloudflare, payment_security_type, cvv_cvc_status, inbuilt_status, ecommerce_platform, cart_abandonment
                 )
                 results.append(result_line)
         except Exception as e:

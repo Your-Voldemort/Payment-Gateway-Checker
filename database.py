@@ -60,6 +60,7 @@ class Database:
                     captcha BOOLEAN,
                     inbuilt_payment BOOLEAN,
                     ecommerce_platform TEXT,
+                    cart_abandonment TEXT,
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
                 )
             """)
@@ -70,6 +71,16 @@ class Database:
                     ALTER TABLE scan_history ADD COLUMN ecommerce_platform TEXT
                 """)
                 logger.info("Added ecommerce_platform column to scan_history table")
+            except Exception as e:
+                # Column already exists or other error - safe to ignore
+                pass
+            
+            # Add cart_abandonment column if it doesn't exist (migration)
+            try:
+                await db.execute("""
+                    ALTER TABLE scan_history ADD COLUMN cart_abandonment TEXT
+                """)
+                logger.info("Added cart_abandonment column to scan_history table")
             except Exception as e:
                 # Column already exists or other error - safe to ignore
                 pass
@@ -404,7 +415,8 @@ async def save_scan_result(
     cloudflare: bool,
     captcha: bool,
     inbuilt_payment: bool,
-    ecommerce_platform: str = "None detected"
+    ecommerce_platform: str = "None detected",
+    cart_abandonment: str = "None detected"
 ) -> bool:
     """Save scan result to history."""
     db = await get_database()
@@ -417,12 +429,12 @@ async def save_scan_result(
                 INSERT INTO scan_history (
                     user_id, url, scanned_at, status_code,
                     gateways_detected, security_type, cvv_status,
-                    cloudflare, captcha, inbuilt_payment, ecommerce_platform
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    cloudflare, captcha, inbuilt_payment, ecommerce_platform, cart_abandonment
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 user_id, url, datetime.now().isoformat(), status_code,
                 json.dumps(gateways), security_type, cvv_status,
-                cloudflare, captcha, inbuilt_payment, ecommerce_platform
+                cloudflare, captcha, inbuilt_payment, ecommerce_platform, cart_abandonment
             ))
             
             # Update gateway statistics
