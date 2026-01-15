@@ -95,3 +95,4 @@ test_cart_abandonment.py
 test_progress_eta.py
 sample_urls.txt
 BULK_SCAN_GUIDE.md
+urlcheckupgrade.md
