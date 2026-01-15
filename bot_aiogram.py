@@ -2188,21 +2188,23 @@ async def process_urls_async(
         # For multiple URLs, show progress with ETA
         progress = ScanProgress(total_urls=total)
         progress.start()
-        
+
         completed = 0
+        # Create URL-to-index mapping for O(1) lookups (fixes O(n²) bottleneck)
+        url_to_idx = {url: i for i, url in enumerate(urls)}
         pending_tasks = {asyncio.create_task(task): url for task, url in zip(tasks, urls)}
         responses = [None] * total  # Preserve order
-        
+
         while pending_tasks:
             # Wait for next task to complete
             done, pending = await asyncio.wait(
-                pending_tasks.keys(), 
+                pending_tasks.keys(),
                 return_when=asyncio.FIRST_COMPLETED
             )
-            
+
             for task in done:
                 url = pending_tasks[task]
-                idx = urls.index(url)
+                idx = url_to_idx[url]  # O(1) dict lookup instead of O(n) list search
                 responses[idx] = await task
                 del pending_tasks[task]
                 completed += 1

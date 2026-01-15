@@ -14,6 +14,9 @@ class RateLimiter:
     def __init__(self):
         self.user_requests: Dict[int, List[float]] = defaultdict(list)
         self._db_initialized = False
+        self._dirty_users: set = set()  # Track users needing DB sync
+        self._flush_interval = 5  # Flush every 5 seconds
+        self._last_flush = time.time()
 
     async def _load_from_db(self, user_id: int):
         """Load rate limit state from database."""
@@ -82,26 +85,49 @@ class RateLimiter:
         # Add current request
         self.user_requests[user_id].append(current_time)
 
-        # Save to database for persistence
-        await self._save_to_db(user_id)
+        # Mark user as needing DB sync (batched writes for performance)
+        self._dirty_users.add(user_id)
+
+        # Periodic flush instead of per-request write
+        if current_time - self._last_flush > self._flush_interval:
+            await self._flush_dirty_users()
 
         return True
     
     def get_wait_time(self, user_id: int) -> int:
         """
         Get the remaining wait time for a rate-limited user.
-        
+
         Args:
             user_id: The Telegram user ID
-            
+
         Returns:
             int: Seconds to wait before next request
         """
         if not self.user_requests[user_id]:
             return 0
-        
+
         current_time = time.time()
         oldest_request = min(self.user_requests[user_id])
         wait_time = Config.RATE_LIMIT_WINDOW - (current_time - oldest_request)
-        
+
         return max(0, int(wait_time))
+
+    async def _flush_dirty_users(self):
+        """
+        Batch write all dirty users to database.
+        Significantly reduces DB I/O by writing multiple users at once.
+        """
+        if not self._dirty_users:
+            return
+
+        logger.debug(f"Flushing rate limit state for {len(self._dirty_users)} users")
+
+        for user_id in list(self._dirty_users):
+            try:
+                await self._save_to_db(user_id)
+            except Exception as e:
+                logger.warning(f"Failed to flush rate limit for user {user_id}: {e}")
+
+        self._dirty_users.clear()
+        self._last_flush = time.time()

@@ -50,21 +50,21 @@ async def check_url(
         logger.warning(f"Invalid URL provided: {url}")
         return [], 400, False, False, "Invalid URL", "N/A", "N/A", "None detected", "None detected"
 
-    # Check cache first (only on first attempt, not retries)
-    if use_cache and retry_count == 0:
+    # Check cache first (now checks on retry attempts too for performance)
+    if use_cache:
         cached = await get_cached_result(url)
         if cached:
-            logger.info(f"Returning cached result for {url[:50]}...")
+            logger.info(f"Cache hit for {url[:50]} (attempt {retry_count + 1})")
             return (
-                cached['gateways'],
-                cached['status_code'],
-                cached['captcha'],
-                cached['cloudflare'],
-                cached['security_type'],
-                cached['cvv_status'],
-                cached['inbuilt_status'],
-                cached.get('ecommerce_platform', 'None detected'),  # Backward compatibility
-                cached.get('cart_abandonment', 'None detected')  # Backward compatibility
+                cached.get('gateways', []),
+                cached.get('status_code', 200),
+                cached.get('captcha', False),
+                cached.get('cloudflare', False),
+                cached.get('security_type', 'Unknown'),
+                cached.get('cvv_status', 'N/A'),
+                cached.get('inbuilt_status', 'N/A'),
+                cached.get('ecommerce_platform', 'None detected'),
+                cached.get('cart_abandonment', 'None detected')
             )
 
     # Use rotating user agent to minimize rate limiting
