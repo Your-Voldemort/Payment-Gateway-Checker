@@ -92,12 +92,47 @@ A production-ready Telegram bot for analyzing websites and identifying payment g
    python bot_aiogram.py
    ```
 
+## 🎯 Usage Examples
+
+### Single URL Scan
+
+```text
+/url https://example.com
+```
+
+### Multiple URLs Scan
+
+```text
+/url stripe.com paypal.com square.com
+```
+
+### Bulk Scan from File
+
+1. Create a `.txt` file with URLs (one per line):
+
+   ```text
+   https://stripe.com
+   https://paypal.com
+   https://square.com/checkout
+   ```
+
+2. Upload the file to the bot
+3. Reply to the file with `/bulk`
+4. Wait for results with real-time progress tracking
+
+See [BULK_SCAN_GUIDE.md](BULK_SCAN_GUIDE.md) for detailed bulk scanning documentation.
+
 ## 📋 Bot Commands
 
 ### User Commands
 
 - `/start` - Welcome screen and quick start guide
+- `/register` - Activate bot access and create account
 - `/url <link>` - Scan one or more URLs (space or newline separated)
+- `/bulk` - Bulk scan URLs from .txt file (reply to uploaded file)
+- `/history` - View your recent scan history with pagination
+- `/subscription` - Check subscription status and expiry date
+- `/buy` - View subscription plans and payment info
 - `/help` - Command reference and detection guide
 - `/cancel` - Abort current operation
 
@@ -106,6 +141,9 @@ A production-ready Telegram bot for analyzing websites and identifying payment g
 - `/stats` - View real-time bot usage statistics
 - `/broadcast` - Send message to all registered users
 - `/addsub <user_id> <duration>` - Grant subscription (e.g., `/addsub 12345 1m`)
+- `/auditlog` - View admin action audit log
+- `/cachestats` - View cache performance statistics
+- `/clearcache` - Clear result cache
 
 ## 📁 Architecture & Modules
 

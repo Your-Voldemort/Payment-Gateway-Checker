@@ -210,6 +210,7 @@ async def cmd_help(message: Message):
         "│  /register  ─  Activate access\n"
         "│  /help      ─  This guide\n"
         "│  /url <link> ─  Scan website\n"
+        "│  /bulk     ─  Bulk scan .txt file\n"
         "│  /history   ─  View scan history\n"
         "│  /stats     ─  Bot statistics ⚡\n"
         "│  /auditlog  ─  Admin action log ⚡\n"
@@ -2266,28 +2267,448 @@ async def process_urls_async(
 
 
 # =============================================================================
-# MEDIA HANDLER - Reject non-text content
+# BULK URL SCANNING - File Upload Handler
 # =============================================================================
 
-@router.message(F.photo | F.video | F.document | F.audio | F.voice | F.sticker)
+@router.message(Command("bulk"))
+async def cmd_bulk_check(message: Message, state: FSMContext):
+    """
+    Handle /bulk command for batch URL scanning from .txt files.
+
+    User workflow:
+    1. Upload a .txt file with URLs (one per line)
+    2. Reply to that file with /bulk command
+    3. Bot processes all URLs in the file
+    """
+    user_id = message.from_user.id
+
+    # Check if message is a reply to a document
+    if not message.reply_to_message or not message.reply_to_message.document:
+        usage_msg = (
+            "╭───────────────────────────╮\n"
+            "│   ℹ️  BULK SCAN GUIDE     │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "Upload URLs in bulk from a file!\n"
+            "\n"
+            "┌─ HOW TO USE ──────────────\n"
+            "│\n"
+            "│  1️⃣ Upload a .txt file with\n"
+            "│     URLs (one per line)\n"
+            "│\n"
+            "│  2️⃣ Reply to the file with:\n"
+            "│     /bulk\n"
+            "│\n"
+            "│  3️⃣ Wait for results! ✨\n"
+            "│\n"
+            "└────────────────────────────\n"
+            "\n"
+            "┌─ FILE FORMAT ─────────────\n"
+            "│\n"
+            "│  https://example1.com\n"
+            "│  https://example2.com\n"
+            "│  example3.com/checkout\n"
+            "│\n"
+            "└────────────────────────────"
+            + get_footer()
+        )
+        await message.answer(usage_msg)
+        return
+
+    # Check if user is registered
+    if not await async_is_user_registered(user_id):
+        not_registered_msg = (
+            "╭───────────────────────────╮\n"
+            "│   ⚠️  ACCESS REQUIRED     │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "You need to register first!\n"
+            "\n"
+            "┌─ GET STARTED ────────────\n"
+            "│\n"
+            "│  ›  Use /register to get access\n"
+            "│  ›  It only takes a second ✨\n"
+            "│\n"
+            "└────────────────────────────"
+            + get_footer()
+        )
+        await message.answer(not_registered_msg)
+        return
+
+    # Check subscription status
+    if not await async_check_subscription(user_id):
+        payment_required_msg = (
+            "╭───────────────────────────╮\n"
+            "│   💳  SUBSCRIPTION NEEDED │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "You need an active subscription\n"
+            "to use the bulk scanner.\n"
+            "\n"
+            "Use /buy to see plans and prices."
+            + get_footer()
+        )
+        await message.answer(payment_required_msg)
+        await cmd_buy(message)
+        return
+
+    # Check rate limit
+    if not await rate_limiter.is_allowed(user_id):
+        wait_time = rate_limiter.get_wait_time(user_id)
+        rate_limit_msg = (
+            "╭───────────────────────────╮\n"
+            "│   ⏳  SLOW DOWN           │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "Rate limit reached.\n"
+            "\n"
+            "┌─ PLEASE WAIT ────────────\n"
+            "│\n"
+            f"│  ⏱️  {wait_time} seconds remaining\n"
+            "│\n"
+            "│  This keeps the bot fast\n"
+            "│  for everyone! 🚀\n"
+            "│\n"
+            "└────────────────────────────"
+            + get_footer()
+        )
+        await message.answer(rate_limit_msg)
+        return
+
+    # Get document from replied message
+    document = message.reply_to_message.document
+
+    # Validate file type
+    if not document.file_name.endswith('.txt'):
+        invalid_format_msg = (
+            "╭───────────────────────────╮\n"
+            "│   ❌  INVALID FILE TYPE   │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "Only .txt files are supported.\n"
+            "\n"
+            "┌─ REQUIREMENTS ───────────\n"
+            "│\n"
+            "│  ✓  File format: .txt\n"
+            "│  ✓  Max size: 1 MB\n"
+            "│  ✓  One URL per line\n"
+            "│\n"
+            "└────────────────────────────"
+            + get_footer()
+        )
+        await message.answer(invalid_format_msg)
+        return
+
+    # Check file size (1 MB limit)
+    if document.file_size > 1 * 1024 * 1024:
+        file_too_large_msg = (
+            "╭───────────────────────────╮\n"
+            "│   ❌  FILE TOO LARGE      │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            f"File size: {document.file_size / 1024:.1f} KB\n"
+            "Maximum: 1024 KB (1 MB)\n"
+            "\n"
+            "Please upload a smaller file."
+            + get_footer()
+        )
+        await message.answer(file_too_large_msg)
+        return
+
+    # Download and parse file
+    try:
+        # Send download status
+        download_msg = await message.answer(
+            "╭───────────────────────────╮\n"
+            "│   📥  DOWNLOADING FILE    │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "Parsing URLs from file...\n"
+            "Please wait..."
+        )
+
+        # Download file using bot from message
+        file = await message.bot.get_file(document.file_id)
+        file_content = await message.bot.download_file(file.file_path)
+
+        # Parse content
+        content = file_content.read().decode('utf-8', errors='ignore')
+
+        # Extract URLs (one per line, ignore empty lines and comments)
+        raw_urls = []
+        for line in content.splitlines():
+            line = line.strip()
+            # Skip empty lines and comments
+            if line and not line.startswith('#'):
+                raw_urls.append(line)
+
+        if not raw_urls:
+            await download_msg.delete()
+            no_urls_msg = (
+                "╭───────────────────────────╮\n"
+                "│   ❌  NO URLs FOUND       │\n"
+                "╰───────────────────────────╯\n"
+                "\n"
+                "The file appears to be empty\n"
+                "or contains no valid URLs.\n"
+                "\n"
+                "┌─ FILE FORMAT ─────────────\n"
+                "│\n"
+                "│  https://example1.com\n"
+                "│  https://example2.com\n"
+                "│  # Comments start with #\n"
+                "│\n"
+                "└────────────────────────────"
+                + get_footer()
+            )
+            await message.answer(no_urls_msg)
+            return
+
+        # Sanitize and normalize URLs
+        urls = []
+        skipped = 0
+        for raw_url in raw_urls:
+            normalized = normalize_url(raw_url)
+            sanitized, is_safe = sanitize_url(normalized)
+            if is_safe:
+                urls.append(sanitized)
+            else:
+                skipped += 1
+                logger.warning(f"Skipped suspicious URL in bulk scan: {raw_url[:50]}")
+
+        if not urls:
+            await download_msg.delete()
+            all_blocked_msg = (
+                "╭───────────────────────────╮\n"
+                "│   ⚠️  ALL URLs BLOCKED    │\n"
+                "╰───────────────────────────╯\n"
+                "\n"
+                f"Found {len(raw_urls)} URLs in file,\n"
+                "but all were blocked for\n"
+                "security reasons.\n"
+                "\n"
+                "Please provide valid HTTP(S) URLs."
+                + get_footer()
+            )
+            await message.answer(all_blocked_msg)
+            return
+
+        # Check URL limit
+        if len(urls) > Config.MAX_URLS_PER_REQUEST:
+            urls = urls[:Config.MAX_URLS_PER_REQUEST]
+            await download_msg.delete()
+            limited_msg = (
+                "╭───────────────────────────╮\n"
+                "│   ⚠️  URL LIMIT REACHED   │\n"
+                "╰───────────────────────────╯\n"
+                "\n"
+                f"File contains {len(raw_urls)} URLs.\n"
+                f"Processing first {Config.MAX_URLS_PER_REQUEST} URLs.\n"
+                "\n"
+                "┌─ NOTE ────────────────────\n"
+                "│\n"
+                "│  For larger batches, split\n"
+                "│  into multiple files.\n"
+                "│\n"
+                "└────────────────────────────\n"
+            )
+            await message.answer(limited_msg)
+
+        # Update download message to show parsing success
+        url_word = "URL" if len(urls) == 1 else "URLs"
+        await download_msg.edit_text(
+            "╭───────────────────────────╮\n"
+            "│   ✅  FILE PARSED         │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            f"📋 Found: {len(urls)} {url_word}\n"
+            f"⚠️ Skipped: {skipped} suspicious\n"
+            "\n"
+            "Starting scan..."
+        )
+
+        # Wait a moment for user to read
+        await asyncio.sleep(1)
+
+        # Create processing message
+        processing_msg = await message.answer(
+            "╭───────────────────────────╮\n"
+            "│   ⏳  BULK SCANNING       │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            f"Analyzing {len(urls)} {url_word}...\n"
+            "\n"
+            "┌─ CHECKING ────────────────\n"
+            "│\n"
+            "│  ›  Payment gateways\n"
+            "│  ›  Security features\n"
+            "│  ›  Protection systems\n"
+            "│\n"
+            "└────────────────────────────\n"
+            "\n"
+            "Please wait..."
+        )
+
+        # Delete download message
+        try:
+            await download_msg.delete()
+        except:
+            pass
+
+        # Process URLs using existing async function
+        logger.info(f"User {user_id} initiated bulk scan of {len(urls)} URLs from file: {document.file_name}")
+        results = await process_urls_async(urls, user_id, processing_msg)
+
+        # Delete processing message
+        try:
+            await processing_msg.delete()
+        except:
+            pass
+
+        # Send results
+        if results:
+            # Save URLs to state for rescan functionality
+            await state.update_data(last_urls=urls)
+
+            # Create header
+            url_count = len(urls)
+            url_word = "URL" if url_count == 1 else "URLs"
+            count_text = f"Analyzed {url_count} {url_word}"
+            count_padded = count_text + " " * (25 - len(count_text))
+
+            header = (
+                "╭───────────────────────────╮\n"
+                "│   ✅  BULK SCAN COMPLETE  │\n"
+                f"│   {count_padded}│\n"
+                "│   📄 " + document.file_name[:20].ljust(20) + " │\n"
+                "╰───────────────────────────╯"
+            )
+
+            await message.answer(header)
+
+            # Send each result
+            footer = get_footer()
+            for i, result in enumerate(results):
+                msg_text = result.rstrip() + footer
+
+                # Add Quick Rescan button
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔄 Quick Rescan", callback_data=f"quick_rescan_{i}")]
+                ])
+
+                await message.answer(msg_text, reply_markup=keyboard)
+
+                # Small delay between messages to avoid flooding
+                if i < len(results) - 1:
+                    await asyncio.sleep(0.1)
+
+    except UnicodeDecodeError:
+        logger.error(f"Failed to decode file {document.file_name}")
+        error_msg = (
+            "╭───────────────────────────╮\n"
+            "│   ❌  DECODE ERROR        │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "Could not read file content.\n"
+            "\n"
+            "Please ensure the file is:\n"
+            "  • Plain text format (.txt)\n"
+            "  • UTF-8 encoding\n"
+            "  • Not corrupted"
+            + get_footer()
+        )
+        await message.answer(error_msg)
+    except Exception as e:
+        logger.error(f"Error in bulk scan: {str(e)}")
+        error_msg = (
+            "╭───────────────────────────╮\n"
+            "│   ❌  PROCESSING ERROR    │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            f"{str(e)[:100]}\n"
+            "\n"
+            "Please try again or contact support."
+            + get_footer()
+        )
+        await message.answer(error_msg)
+
+
+# =============================================================================
+# MEDIA HANDLER - Handle non-text content
+# =============================================================================
+
+@router.message(F.photo | F.video | F.audio | F.voice | F.sticker)
 async def handle_media(message: Message):
-    """Handle media messages."""
+    """Handle non-document media messages."""
     media_msg = (
         "╭───────────────────────────╮\n"
         "│   ❌  TEXT ONLY           │\n"
         "╰───────────────────────────╯\n"
         "\n"
-        "Please use the /url command.\n"
+        "Please use text commands.\n"
         "\n"
-        "┌─ USE COMMAND ────────────\n"
+        "┌─ AVAILABLE COMMANDS ──────\n"
         "│\n"
         "│  ›  /url example.com\n"
-        "│  ›  /url https://site.com\n"
+        "│  ›  /bulk (reply to .txt)\n"
+        "│  ›  /help for more info\n"
         "│\n"
         "└────────────────────────────"
         + get_footer()
     )
     await message.answer(media_msg)
+
+
+@router.message(F.document)
+async def handle_document(message: Message):
+    """Handle document uploads with helpful instructions."""
+    document = message.document
+    file_name = document.file_name or "unknown"
+
+    if file_name.endswith('.txt'):
+        # Helpful message for .txt files
+        doc_msg = (
+            "╭───────────────────────────╮\n"
+            "│   📄  TEXT FILE DETECTED  │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "To scan URLs from this file:\n"
+            "\n"
+            "┌─ NEXT STEP ───────────────\n"
+            "│\n"
+            "│  1️⃣ Reply to this file\n"
+            "│  2️⃣ Type: /bulk\n"
+            "│  3️⃣ Wait for results! ✨\n"
+            "│\n"
+            "└────────────────────────────\n"
+            "\n"
+            "💡 The file should contain URLs,\n"
+            "one per line."
+            + get_footer()
+        )
+    else:
+        # For other file types
+        doc_msg = (
+            "╭───────────────────────────╮\n"
+            "│   ❌  UNSUPPORTED FILE    │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "Only .txt files are supported.\n"
+            "\n"
+            "┌─ BULK SCANNING ───────────\n"
+            "│\n"
+            "│  1️⃣ Create a .txt file with\n"
+            "│     URLs (one per line)\n"
+            "│\n"
+            "│  2️⃣ Upload the file\n"
+            "│\n"
+            "│  3️⃣ Reply with /bulk\n"
+            "│\n"
+            "└────────────────────────────"
+            + get_footer()
+        )
+
+    await message.answer(doc_msg)
 
 
 # =============================================================================
