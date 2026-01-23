@@ -97,3 +97,5 @@ sample_urls.txt
 BULK_SCAN_GUIDE.md
 urlcheckupgrade.md
 test_optimizations.py
+QUICK_SUMMARY.txt
+IMPLEMENTATION_STATUS.md

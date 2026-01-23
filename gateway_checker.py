@@ -1,10 +1,15 @@
 """Payment gateway checking functionality with optimized detection, retry logic, and result caching."""
+
 import aiohttp
 import asyncio
 from typing import Tuple, List
 from config import Config
 from utils import is_valid_url
-from detection import analyze_url_response, detect_ecommerce_platform, detect_cart_abandonment_tools
+from detection import (
+    analyze_url_response,
+    detect_ecommerce_platform,
+    detect_cart_abandonment_tools,
+)
 from user_agents import get_random_user_agent
 from cache_manager import get_cached_result, save_to_cache
 from logger import setup_logger
@@ -21,7 +26,7 @@ async def check_url(
     url: str,
     session: aiohttp.ClientSession = None,
     retry_count: int = 0,
-    use_cache: bool = True
+    use_cache: bool = True,
 ) -> Tuple[List[str], int, bool, bool, str, str, str, str, str]:
     """
     Check the provided URL for payment gateways, security features, e-commerce platform, and cart abandonment tools.
@@ -48,7 +53,17 @@ async def check_url(
     """
     if not is_valid_url(url):
         logger.warning(f"Invalid URL provided: {url}")
-        return [], 400, False, False, "Invalid URL", "N/A", "N/A", "None detected", "None detected"
+        return (
+            [],
+            400,
+            False,
+            False,
+            "Invalid URL",
+            "N/A",
+            "N/A",
+            "None detected",
+            "None detected",
+        )
 
     # Check cache first (now checks on retry attempts too for performance)
     if use_cache:
@@ -56,27 +71,37 @@ async def check_url(
         if cached:
             logger.info(f"Cache hit for {url[:50]} (attempt {retry_count + 1})")
             return (
-                cached.get('gateways', []),
-                cached.get('status_code', 200),
-                cached.get('captcha', False),
-                cached.get('cloudflare', False),
-                cached.get('security_type', 'Unknown'),
-                cached.get('cvv_status', 'N/A'),
-                cached.get('inbuilt_status', 'N/A'),
-                cached.get('ecommerce_platform', 'None detected'),
-                cached.get('cart_abandonment', 'None detected')
+                cached.get("gateways", []),
+                cached.get("status_code", 200),
+                cached.get("captcha", False),
+                cached.get("cloudflare", False),
+                cached.get("security_type", "Unknown"),
+                cached.get("cvv_status", "N/A"),
+                cached.get("inbuilt_status", "N/A"),
+                cached.get("ecommerce_platform", "None detected"),
+                cached.get("cart_abandonment", "None detected"),
             )
 
     # Use rotating user agent to minimize rate limiting
     user_agent = get_random_user_agent()
-    
+
+    # Enhanced headers to bypass 403 Forbidden and appear as real browser
+    # Includes Referer, proper Accept headers, security headers, and connection settings
     headers = {
-        'User-Agent': user_agent,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1'
+        "User-Agent": user_agent,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Accept-Language": "en-US,en;q=0.9,en-GB;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Referer": "https://www.google.com/",  # Pretend to come from Google search
+        "DNT": "1",
+        "Connection": "keep-alive",
+        "Keep-Alive": "timeout=5, max=100",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Cache-Control": "max-age=0",
     }
 
     # Create session if not provided
@@ -86,16 +111,17 @@ async def check_url(
         close_session = True
 
     try:
-        attempt_info = f" (attempt {retry_count + 1}/{MAX_RETRIES + 1})" if retry_count > 0 else ""
+        attempt_info = (
+            f" (attempt {retry_count + 1}/{MAX_RETRIES + 1})" if retry_count > 0 else ""
+        )
         logger.info(f"Checking URL: {url}{attempt_info}")
+
+        # Add small delay to appear more human-like and reduce bot detection
+        await asyncio.sleep(0.3)
 
         timeout = aiohttp.ClientTimeout(total=Config.REQUEST_TIMEOUT)
         async with session.get(
-            url,
-            headers=headers,
-            timeout=timeout,
-            allow_redirects=True,
-            ssl=True
+            url, headers=headers, timeout=timeout, allow_redirects=True, ssl=True
         ) as response:
             response.raise_for_status()
             text = await response.text()
@@ -103,67 +129,73 @@ async def check_url(
             # Use the new optimized detection module
             # This provides word-boundary matching, SDK detection, and header analysis
             analysis = analyze_url_response(
-                html=text,
-                headers=dict(response.headers),
-                status_code=response.status
+                html=text, headers=dict(response.headers), status_code=response.status
             )
-            
+
             # Detect e-commerce platform
             platform_detection = detect_ecommerce_platform(
-                html=text,
-                headers=dict(response.headers)
+                html=text, headers=dict(response.headers)
             )
-            
+
             # Get platform name or "None detected"
-            platform_name = platform_detection['platform'] if platform_detection['platform'] else "None detected"
-            
+            platform_name = (
+                platform_detection["platform"]
+                if platform_detection["platform"]
+                else "None detected"
+            )
+
             # Log platform detection
-            if platform_detection['platform']:
-                logger.info(f"Detected e-commerce platform for {url}: {platform_name} "
-                           f"(confidence: {platform_detection['confidence']:.0%})")
-            
+            if platform_detection["platform"]:
+                logger.info(
+                    f"Detected e-commerce platform for {url}: {platform_name} "
+                    f"(confidence: {platform_detection['confidence']:.0%})"
+                )
+
             # Detect cart abandonment tools
             cart_abandonment = detect_cart_abandonment_tools(
-                html=text,
-                headers=dict(response.headers)
+                html=text, headers=dict(response.headers)
             )
-            
-            # Get cart abandonment summary
-            cart_summary = cart_abandonment['summary']
-            
-            # Log cart abandonment detection
-            if cart_abandonment['tools']:
-                logger.info(f"Detected cart abandonment tools for {url}: {cart_summary}")
 
-            logger.info(f"Successfully checked {url} - Status: {response.status}, "
-                       f"Gateways: {len(analysis['gateways'])} "
-                       f"(High confidence: {len(analysis['high_confidence_gateways'])})")
+            # Get cart abandonment summary
+            cart_summary = cart_abandonment["summary"]
+
+            # Log cart abandonment detection
+            if cart_abandonment["tools"]:
+                logger.info(
+                    f"Detected cart abandonment tools for {url}: {cart_summary}"
+                )
+
+            logger.info(
+                f"Successfully checked {url} - Status: {response.status}, "
+                f"Gateways: {len(analysis['gateways'])} "
+                f"(High confidence: {len(analysis['high_confidence_gateways'])})"
+            )
 
             # Cache the result if successful (status 200) and caching is enabled
             if use_cache and response.status == 200:
                 cache_data = {
-                    'gateways': analysis['gateways'],
-                    'status_code': response.status,
-                    'captcha': analysis['captcha'],
-                    'cloudflare': analysis['cloudflare'],
-                    'security_type': analysis['security_type'],
-                    'cvv_status': analysis['cvv_status'],
-                    'inbuilt_status': analysis['inbuilt_status'],
-                    'ecommerce_platform': platform_name,
-                    'cart_abandonment': cart_summary
+                    "gateways": analysis["gateways"],
+                    "status_code": response.status,
+                    "captcha": analysis["captcha"],
+                    "cloudflare": analysis["cloudflare"],
+                    "security_type": analysis["security_type"],
+                    "cvv_status": analysis["cvv_status"],
+                    "inbuilt_status": analysis["inbuilt_status"],
+                    "ecommerce_platform": platform_name,
+                    "cart_abandonment": cart_summary,
                 }
                 await save_to_cache(url, cache_data)
 
             return (
-                analysis['gateways'],
+                analysis["gateways"],
                 response.status,
-                analysis['captcha'],
-                analysis['cloudflare'],
-                analysis['security_type'],
-                analysis['cvv_status'],
-                analysis['inbuilt_status'],
+                analysis["captcha"],
+                analysis["cloudflare"],
+                analysis["security_type"],
+                analysis["cvv_status"],
+                analysis["inbuilt_status"],
                 platform_name,
-                cart_summary
+                cart_summary,
             )
 
     except aiohttp.ClientResponseError as http_err:
@@ -173,46 +205,115 @@ async def check_url(
         if 400 <= status_code < 500:
             logger.error(f"HTTP client error for {url}: {status_code}")
             if status_code == 403:
-                return [], 403, False, False, "403 Forbidden: Access Denied", "N/A", "N/A", "None detected", "None detected"
+                logger.warning(
+                    f"Access Denied (403) for {url} - server is blocking bot requests. "
+                    f"Site may have WAF/anti-bot protection. "
+                    f"Attempted with enhanced headers and delays."
+                )
+                return (
+                    [],
+                    403,
+                    False,
+                    False,
+                    "403 Forbidden: Access Denied",
+                    "N/A",
+                    "N/A",
+                    "None detected",
+                    "None detected",
+                )
             else:
-                return [], status_code, False, False, f"HTTP Error: {status_code}", "N/A", "N/A", "None detected", "None detected"
+                return (
+                    [],
+                    status_code,
+                    False,
+                    False,
+                    f"HTTP Error: {status_code}",
+                    "N/A",
+                    "N/A",
+                    "None detected",
+                    "None detected",
+                )
 
         # Retry server errors (5xx) - these are often transient
         if retry_count < MAX_RETRIES:
-            delay = RETRY_DELAY * (RETRY_BACKOFF ** retry_count)
-            logger.warning(f"Server error {status_code} for {url}, retrying in {delay}s...")
+            delay = RETRY_DELAY * (RETRY_BACKOFF**retry_count)
+            logger.warning(
+                f"Server error {status_code} for {url}, retrying in {delay}s..."
+            )
             await asyncio.sleep(delay)
             return await check_url(url, session, retry_count + 1, use_cache)
 
         logger.error(f"HTTP error for {url} after {MAX_RETRIES} retries: {status_code}")
-        return [], status_code, False, False, f"HTTP Error: {status_code}", "N/A", "N/A", "None detected", "None detected"
+        return (
+            [],
+            status_code,
+            False,
+            False,
+            f"HTTP Error: {status_code}",
+            "N/A",
+            "N/A",
+            "None detected",
+            "None detected",
+        )
 
     except aiohttp.ServerTimeoutError:
         # Retry timeouts - could be temporary network congestion
         if retry_count < MAX_RETRIES:
-            delay = RETRY_DELAY * (RETRY_BACKOFF ** retry_count)
+            delay = RETRY_DELAY * (RETRY_BACKOFF**retry_count)
             logger.warning(f"Timeout for {url}, retrying in {delay}s...")
             await asyncio.sleep(delay)
             return await check_url(url, session, retry_count + 1, use_cache)
 
         logger.error(f"Timeout for {url} after {MAX_RETRIES} retries")
-        return [], 408, False, False, "Request Timeout", "N/A", "N/A", "None detected", "None detected"
+        return (
+            [],
+            408,
+            False,
+            False,
+            "Request Timeout",
+            "N/A",
+            "N/A",
+            "None detected",
+            "None detected",
+        )
 
     except aiohttp.ClientConnectionError as conn_err:
         # Retry connection errors - network issues are often temporary
         if retry_count < MAX_RETRIES:
-            delay = RETRY_DELAY * (RETRY_BACKOFF ** retry_count)
+            delay = RETRY_DELAY * (RETRY_BACKOFF**retry_count)
             logger.warning(f"Connection error for {url}, retrying in {delay}s...")
             await asyncio.sleep(delay)
             return await check_url(url, session, retry_count + 1, use_cache)
 
-        logger.error(f"Connection error for {url} after {MAX_RETRIES} retries: {str(conn_err)}")
-        return [], 503, False, False, "Connection Error", "N/A", "N/A", "None detected", "None detected"
+        logger.error(
+            f"Connection error for {url} after {MAX_RETRIES} retries: {str(conn_err)}"
+        )
+        return (
+            [],
+            503,
+            False,
+            False,
+            "Connection Error",
+            "N/A",
+            "N/A",
+            "None detected",
+            "None detected",
+        )
 
     except Exception as e:
         logger.error(f"Unexpected error checking {url}: {str(e)}")
-        return [], 500, False, False, f"Error: {str(e)}", "N/A", "N/A", "None detected", "None detected"
-    
+        return (
+            [],
+            500,
+            False,
+            False,
+            f"Error: {str(e)}",
+            "N/A",
+            "N/A",
+            "None detected",
+            "None detected",
+        )
+
     finally:
         # Close session if we created it
         if close_session:
