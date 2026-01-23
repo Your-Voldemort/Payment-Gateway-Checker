@@ -2,7 +2,9 @@
 
 import aiohttp
 import asyncio
+import time
 from typing import Tuple, List
+from urllib.parse import urlparse
 from config import Config
 from utils import is_valid_url
 from detection import (
@@ -235,10 +237,30 @@ async def check_url(
                     "None detected",
                 )
             elif status_code == 400:
+                # Phase 3: Try /index.html variant for bare domains
+                parsed = urlparse(url)
+                path = parsed.path or ""
+
+                if (
+                    not path
+                    or path == "/"
+                    or not path.endswith((".html", ".php", ".aspx", "/"))
+                ):
+                    # Try adding /index.html
+                    variant_url = url.rstrip("/") + "/index.html"
+                    if "?" not in variant_url:
+                        variant_url += "?_t=" + str(int(time.time() * 1000))
+
+                    logger.warning(
+                        f"Bad Request (400) for {url} - trying /index.html variant..."
+                    )
+                    await asyncio.sleep(0.5)
+                    return await check_url(variant_url, session, retry_count, use_cache)
+
                 logger.warning(
                     f"Bad Request (400) for {url} - server rejected request format. "
-                    f"Possible causes: Missing query params, malformed URL, incorrect headers. "
-                    f"Attempted with Host/Origin headers and realistic caching headers."
+                    f"Possible causes: Server requires authentication, API key, or blocks bot traffic. "
+                    f"Attempted with enhanced headers, Host/Origin fields, and trailing slash handling."
                 )
                 return (
                     [],
