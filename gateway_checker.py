@@ -85,23 +85,36 @@ async def check_url(
     # Use rotating user agent to minimize rate limiting
     user_agent = get_random_user_agent()
 
-    # Enhanced headers to bypass 403 Forbidden and appear as real browser
-    # Includes Referer, proper Accept headers, security headers, and connection settings
+    # Extract hostname from URL for Host/Origin headers (Phase 2 bypass improvement)
+    from urllib.parse import urlparse
+
+    parsed_url = urlparse(url)
+    hostname = parsed_url.netloc or parsed_url.hostname or ""
+
+    # Enhanced headers to bypass 403/400 errors and appear as real browser
+    # Phase 1: User-Agent rotation, enhanced Accept headers, security headers
+    # Phase 2: Host/Origin headers, pragma/cache headers for realistic requests
     headers = {
         "User-Agent": user_agent,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         "Accept-Language": "en-US,en;q=0.9,en-GB;q=0.8",
         "Accept-Encoding": "gzip, deflate, br",
-        "Referer": "https://www.google.com/",  # Pretend to come from Google search
+        "Accept-Charset": "utf-8;q=0.7,*;q=0.7",
+        "Host": hostname,  # 🔑 Critical: Match target domain
+        "Origin": f"https://{hostname}",  # 🔑 Same-origin request appearance
+        "Referer": f"https://{hostname}/",  # Self-referral instead of Google (less suspicious for 400)
         "DNT": "1",
         "Connection": "keep-alive",
         "Keep-Alive": "timeout=5, max=100",
         "Upgrade-Insecure-Requests": "1",
+        "Pragma": "no-cache",  # Realistic browser caching header
         "Sec-Fetch-Dest": "document",
         "Sec-Fetch-Mode": "navigate",
         "Sec-Fetch-Site": "none",
         "Sec-Fetch-User": "?1",
         "Cache-Control": "max-age=0",
+        "If-None-Match": "",  # Simulate conditional request (seen in real browsers)
+        "If-Modified-Since": "Mon, 01 Jan 2024 00:00:00 GMT",  # Realistic cache timestamp
     }
 
     # Create session if not provided
@@ -216,6 +229,23 @@ async def check_url(
                     False,
                     False,
                     "403 Forbidden: Access Denied",
+                    "N/A",
+                    "N/A",
+                    "None detected",
+                    "None detected",
+                )
+            elif status_code == 400:
+                logger.warning(
+                    f"Bad Request (400) for {url} - server rejected request format. "
+                    f"Possible causes: Missing query params, malformed URL, incorrect headers. "
+                    f"Attempted with Host/Origin headers and realistic caching headers."
+                )
+                return (
+                    [],
+                    400,
+                    False,
+                    False,
+                    "HTTP Error: 400 Bad Request",
                     "N/A",
                     "N/A",
                     "None detected",
