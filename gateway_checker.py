@@ -3,8 +3,9 @@
 import aiohttp
 import asyncio
 import time
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 from urllib.parse import urlparse
+from concurrent.futures import ThreadPoolExecutor
 from config import Config
 from utils import is_valid_url
 from detection import (
@@ -18,15 +19,70 @@ from logger import setup_logger
 
 logger = setup_logger()
 
+# Try to import curl_cffi for TLS fingerprint bypass (handles CDN/WAF that use JA3 fingerprinting)
+try:
+    from curl_cffi import requests as curl_requests
+
+    CURL_CFFI_AVAILABLE = True
+    logger.info("curl_cffi available for TLS fingerprint bypass")
+except ImportError:
+    CURL_CFFI_AVAILABLE = False
+    logger.warning(
+        "curl_cffi not installed - some CDNs may block requests (pip install curl_cffi)"
+    )
+
+# Thread pool for running sync curl_cffi in async context
+_curl_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix="curl_cffi_")
+
 # Retry configuration for transient failures
 MAX_RETRIES = 3
 RETRY_DELAY = 1  # seconds
 RETRY_BACKOFF = 2  # exponential backoff multiplier
 
 
+def _fetch_with_curl_cffi(url: str, timeout: int = 15) -> Tuple[str, int, dict]:
+    """
+    Fetch URL using curl_cffi with Chrome browser impersonation.
+
+    This bypasses TLS/JA3 fingerprinting used by CDNs like Fastly, Cloudflare, Akamai.
+
+    Args:
+        url: URL to fetch
+        timeout: Request timeout in seconds
+
+    Returns:
+        Tuple of (html_content, status_code, headers_dict)
+
+    Raises:
+        Exception on network/request errors
+    """
+    if not CURL_CFFI_AVAILABLE:
+        raise RuntimeError("curl_cffi not available")
+
+    response = curl_requests.get(
+        url,
+        impersonate="chrome",  # Impersonate Chrome browser TLS fingerprint
+        timeout=timeout,
+        allow_redirects=True,
+    )
+    return response.text, response.status_code, dict(response.headers)
+
+
+async def _async_fetch_with_curl_cffi(
+    url: str, timeout: int = 15
+) -> Tuple[str, int, dict]:
+    """
+    Async wrapper for curl_cffi fetch (runs in thread pool).
+    """
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        _curl_executor, _fetch_with_curl_cffi, url, timeout
+    )
+
+
 async def check_url(
     url: str,
-    session: aiohttp.ClientSession = None,
+    session: Optional[aiohttp.ClientSession] = None,
     retry_count: int = 0,
     use_cache: bool = True,
 ) -> Tuple[List[str], int, bool, bool, str, str, str, str, str]:
@@ -87,36 +143,27 @@ async def check_url(
     # Use rotating user agent to minimize rate limiting
     user_agent = get_random_user_agent()
 
-    # Extract hostname from URL for Host/Origin headers (Phase 2 bypass improvement)
-    from urllib.parse import urlparse
-
-    parsed_url = urlparse(url)
-    hostname = parsed_url.netloc or parsed_url.hostname or ""
-
-    # Enhanced headers to bypass 403/400 errors and appear as real browser
-    # Phase 1: User-Agent rotation, enhanced Accept headers, security headers
-    # Phase 2: Host/Origin headers, pragma/cache headers for realistic requests
+    # Browser-like headers to bypass WAF/CDN bot detection
+    # Modern CDNs (Fastly, Cloudflare, Akamai) use TLS fingerprinting and header analysis
+    # Adding Sec-Fetch-* headers and other modern browser headers reduces 400/403 errors
     headers = {
         "User-Agent": user_agent,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-        "Accept-Language": "en-US,en;q=0.9,en-GB;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
         "Accept-Encoding": "gzip, deflate, br",
-        "Accept-Charset": "utf-8;q=0.7,*;q=0.7",
-        "Host": hostname,  # 🔑 Critical: Match target domain
-        "Origin": f"https://{hostname}",  # 🔑 Same-origin request appearance
-        "Referer": f"https://{hostname}/",  # Self-referral instead of Google (less suspicious for 400)
-        "DNT": "1",
         "Connection": "keep-alive",
-        "Keep-Alive": "timeout=5, max=100",
         "Upgrade-Insecure-Requests": "1",
-        "Pragma": "no-cache",  # Realistic browser caching header
+        # Modern browser security headers (Sec-Fetch-* are sent by all modern browsers)
         "Sec-Fetch-Dest": "document",
         "Sec-Fetch-Mode": "navigate",
         "Sec-Fetch-Site": "none",
         "Sec-Fetch-User": "?1",
+        # Additional headers for better compatibility
         "Cache-Control": "max-age=0",
-        "If-None-Match": "",  # Simulate conditional request (seen in real browsers)
-        "If-Modified-Since": "Mon, 01 Jan 2024 00:00:00 GMT",  # Realistic cache timestamp
+        "DNT": "1",  # Do Not Track
+        "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
     }
 
     # Create session if not provided
@@ -136,7 +183,7 @@ async def check_url(
 
         timeout = aiohttp.ClientTimeout(total=Config.REQUEST_TIMEOUT)
         async with session.get(
-            url, headers=headers, timeout=timeout, allow_redirects=True, ssl=True
+            url, headers=headers, timeout=timeout, allow_redirects=True
         ) as response:
             response.raise_for_status()
             text = await response.text()
@@ -237,30 +284,89 @@ async def check_url(
                     "None detected",
                 )
             elif status_code == 400:
-                # Phase 3: Try /index.html variant for bare domains
-                parsed = urlparse(url)
-                path = parsed.path or ""
-
-                if (
-                    not path
-                    or path == "/"
-                    or not path.endswith((".html", ".php", ".aspx", "/"))
-                ):
-                    # Try adding /index.html
-                    variant_url = url.rstrip("/") + "/index.html"
-                    if "?" not in variant_url:
-                        variant_url += "?_t=" + str(int(time.time() * 1000))
-
+                # Phase 3: For 400 errors, try multiple fallback strategies
+                if retry_count == 0:
+                    # First fallback: retry with fresh session
                     logger.warning(
-                        f"Bad Request (400) for {url} - trying /index.html variant..."
+                        f"Bad Request (400) for {url} - retrying with fresh session..."
                     )
                     await asyncio.sleep(0.5)
-                    return await check_url(variant_url, session, retry_count, use_cache)
+                    return await check_url(url, None, retry_count + 1, use_cache)
+
+                elif retry_count == 1 and CURL_CFFI_AVAILABLE:
+                    # Second fallback: use curl_cffi with browser TLS impersonation
+                    # This bypasses CDN/WAF TLS fingerprinting (JA3/JA4)
+                    logger.warning(
+                        f"Bad Request (400) for {url} - retrying with curl_cffi (browser TLS)..."
+                    )
+                    try:
+                        (
+                            text,
+                            curl_status,
+                            curl_headers,
+                        ) = await _async_fetch_with_curl_cffi(
+                            url, timeout=Config.REQUEST_TIMEOUT
+                        )
+
+                        if curl_status == 200:
+                            logger.info(
+                                f"curl_cffi succeeded for {url} - bypassed TLS fingerprinting"
+                            )
+
+                            # Use the detection module to analyze the response
+                            analysis = analyze_url_response(
+                                html=text, headers=curl_headers, status_code=curl_status
+                            )
+                            platform_detection = detect_ecommerce_platform(
+                                html=text, headers=curl_headers
+                            )
+                            platform_name = (
+                                platform_detection["platform"]
+                                if platform_detection["platform"]
+                                else "None detected"
+                            )
+                            cart_abandonment = detect_cart_abandonment_tools(
+                                html=text, headers=curl_headers
+                            )
+                            cart_summary = cart_abandonment["summary"]
+
+                            # Cache successful result
+                            if use_cache:
+                                cache_data = {
+                                    "gateways": analysis["gateways"],
+                                    "status_code": curl_status,
+                                    "captcha": analysis["captcha"],
+                                    "cloudflare": analysis["cloudflare"],
+                                    "security_type": analysis["security_type"],
+                                    "cvv_status": analysis["cvv_status"],
+                                    "inbuilt_status": analysis["inbuilt_status"],
+                                    "ecommerce_platform": platform_name,
+                                    "cart_abandonment": cart_summary,
+                                }
+                                await save_to_cache(url, cache_data)
+
+                            return (
+                                analysis["gateways"],
+                                curl_status,
+                                analysis["captcha"],
+                                analysis["cloudflare"],
+                                analysis["security_type"],
+                                analysis["cvv_status"],
+                                analysis["inbuilt_status"],
+                                platform_name,
+                                cart_summary,
+                            )
+                        else:
+                            logger.warning(
+                                f"curl_cffi got status {curl_status} for {url}"
+                            )
+                    except Exception as curl_err:
+                        logger.error(f"curl_cffi failed for {url}: {curl_err}")
 
                 logger.warning(
                     f"Bad Request (400) for {url} - server rejected request format. "
-                    f"Possible causes: Server requires authentication, API key, or blocks bot traffic. "
-                    f"Attempted with enhanced headers, Host/Origin fields, and trailing slash handling."
+                    f"Possible causes: CDN/WAF blocking, server requires authentication, "
+                    f"or API key needed."
                 )
                 return (
                     [],

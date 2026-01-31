@@ -23,6 +23,7 @@ Usage:
 """
 
 import asyncio
+import ssl
 import aiohttp
 from typing import Optional, Dict, Any
 from logger import setup_logger
@@ -57,7 +58,7 @@ class PersistentHTTPClient:
     - Graceful shutdown with connection draining
     """
 
-    _instance: Optional['PersistentHTTPClient'] = None
+    _instance: Optional["PersistentHTTPClient"] = None
 
     def __init__(self):
         self._session: Optional[aiohttp.ClientSession] = None
@@ -65,7 +66,7 @@ class PersistentHTTPClient:
         self._initialized: bool = False
 
     @classmethod
-    async def get_instance(cls) -> 'PersistentHTTPClient':
+    async def get_instance(cls) -> "PersistentHTTPClient":
         """
         Get or create the singleton instance.
 
@@ -96,21 +97,34 @@ class PersistentHTTPClient:
         if self._initialized and self._session and not self._session.closed:
             return
 
+        # Create SSL context with broader compatibility for various server configs
+        # Some servers (especially behind Fastly/CDN) need specific SSL settings
+        ssl_context = ssl.create_default_context()
+        # Allow legacy renegotiation for servers that require it (common with Fastly CDN)
+        # OP_LEGACY_SERVER_CONNECT is available in Python 3.12+
+        if hasattr(ssl, "OP_LEGACY_SERVER_CONNECT"):
+            ssl_context.options |= ssl.OP_LEGACY_SERVER_CONNECT
+        # Use broader cipher suite for compatibility
+        ssl_context.set_ciphers("DEFAULT:@SECLEVEL=1")
+        ssl_context.check_hostname = True
+        ssl_context.verify_mode = ssl.CERT_REQUIRED
+
         # Create optimized connector with connection pooling
         self._connector = aiohttp.TCPConnector(
-            limit=100,                    # Total connections across all hosts
-            limit_per_host=10,            # Connections per host
-            ttl_dns_cache=300,            # DNS cache TTL (5 minutes)
-            keepalive_timeout=30,         # Keep connections alive (seconds)
-            enable_cleanup_closed=True,   # Clean up closed connections
-            force_close=False,            # Allow connection reuse
+            limit=100,  # Total connections across all hosts
+            limit_per_host=10,  # Connections per host
+            ttl_dns_cache=300,  # DNS cache TTL (5 minutes)
+            keepalive_timeout=30,  # Keep connections alive (seconds)
+            enable_cleanup_closed=True,  # Clean up closed connections
+            force_close=False,  # Allow connection reuse
+            ssl=ssl_context,  # Use custom SSL context
         )
 
         # Default timeout configuration
         timeout = aiohttp.ClientTimeout(
             total=Config.REQUEST_TIMEOUT,
             connect=5,  # Connection timeout
-            sock_read=Config.REQUEST_TIMEOUT  # Read timeout
+            sock_read=Config.REQUEST_TIMEOUT,  # Read timeout
         )
 
         # Create session with connector
@@ -122,14 +136,18 @@ class PersistentHTTPClient:
         )
 
         self._initialized = True
-        logger.info("Persistent HTTP client initialized with connection pooling "
-                   f"(limit=100, per_host=10, dns_cache=300s)")
+        logger.info(
+            "Persistent HTTP client initialized with connection pooling "
+            f"(limit=100, per_host=10, dns_cache=300s)"
+        )
 
     @property
     def session(self) -> aiohttp.ClientSession:
         """Get the underlying aiohttp session."""
         if not self._initialized or self._session is None or self._session.closed:
-            raise RuntimeError("HTTP client not initialized. Call get_instance() first.")
+            raise RuntimeError(
+                "HTTP client not initialized. Call get_instance() first."
+            )
         return self._session
 
     async def close(self) -> None:
@@ -167,6 +185,7 @@ class PersistentHTTPClient:
 
 
 # Module-level convenience functions
+
 
 async def get_http_client() -> PersistentHTTPClient:
     """

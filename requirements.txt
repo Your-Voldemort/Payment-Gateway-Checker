@@ -12,6 +12,10 @@ aiosqlite>=0.19.0
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
 
+# TLS fingerprint bypass for CDN/WAF that use JA3 fingerprinting (Fastly, Cloudflare, Akamai)
+# This allows the bot to access sites that block Python's default TLS fingerprint
+curl_cffi>=0.6.0
+
 # Optional performance optimization (10-20x faster pattern matching)
 # Install separately: pip install pyahocorasick
 pyahocorasick>=2.0.0
