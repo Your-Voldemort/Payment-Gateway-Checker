@@ -47,7 +47,7 @@ OPTIMIZATION_PLAN.md
 AGENTS.md
 CRITICAL-001-FIX-SUMMARY.md
 
-# Auto Claude data directory
+# Auto Claude data directory and other stuff
 .auto-claude/
 .claude/
 .claude_settings.json
@@ -97,3 +97,10 @@ sample_urls.txt
 BULK_SCAN_GUIDE.md
 urlcheckupgrade.md
 test_optimizations.py
+GATEWAY_CHECKER_UI_EXAMPLES.md
+IMPLEMENTATION_STATUS.md
+QUICK_SUMMARY.txt
+TELEGRAM_UI_SUMMARY.md
+test_bugs_comprehensive.py
+UI_EXAMPLES_2025.md
+UI_RESEARCH_INDEX.md
