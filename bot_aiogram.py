@@ -821,9 +821,7 @@ async def cmd_history(message: Message):
     keyboard_buttons = []
     
     if total_pages > 1:
-        nav_buttons = []
-        if total_pages > 1:
-            nav_buttons.append(InlineKeyboardButton(text="▶️ Next", callback_data="history_page_2"))
+        nav_buttons = [InlineKeyboardButton(text="▶️ Next", callback_data="history_page_2")]
         keyboard_buttons.append(nav_buttons)
     
     keyboard_buttons.append([InlineKeyboardButton(text="🔙 Menu", callback_data="back_main")])
@@ -1141,7 +1139,7 @@ async def callback_register(callback: CallbackQuery):
     user_id = callback.from_user.id
     first_name = callback.from_user.first_name or "User"
 
-    status = await async_register_user(user_id, message.from_user.username, first_name)
+    status = await async_register_user(user_id, callback.from_user.username, first_name)
 
     if status == 'new':
         logger.info(f"User {user_id} registered via button")
@@ -1824,11 +1822,17 @@ async def callback_rescan(callback: CallbackQuery, state: FSMContext):
     except:
         pass
     
-    # Send results
+    # Send results with action buttons
     footer = get_footer()
-    for result in results:
+    for i, result in enumerate(results):
         msg_text = result.rstrip() + footer
-        await callback.message.answer(msg_text)
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🔄 Rescan", callback_data=f"rescan_{i}"),
+                InlineKeyboardButton(text="🏠 Menu", callback_data="back_main")
+            ]
+        ])
+        await callback.message.answer(msg_text, reply_markup=keyboard)
 
 
 @router.callback_query(F.data.startswith("quick_rescan_"))
