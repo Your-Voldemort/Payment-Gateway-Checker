@@ -280,6 +280,20 @@ SDK_PATTERNS: Dict[str, List[Tuple[str, float]]] = {
         (r'woocommerce', 0.70),
         (r'wc-payment', 0.85),
     ],
+    # Sift Science
+    "Sift Science": [
+        (r'js\.siftscience\.com', 0.98),
+        (r'Sift\.init\(\{', 0.98),
+        (r'Sift\.signupEvent', 0.95),
+        (r'Sift\.transactionEvent', 0.95),
+    ],
+    # Bolt
+    "Bolt": [
+        (r'cdn\.bolt\.com/checkout', 0.98),
+        (r'Bolt\.checkout\(', 0.98),
+        (r'bolt-button', 0.90),
+        (r'data-bolt-', 0.90),
+    ],
 }
 
 

@@ -95,6 +95,12 @@ GATEWAYS_GLOBAL_MAJOR = [
     "heartlandpaymentsystems", "hps-", "portico",
     # Fiserv / First Data
     "fiserv", "firstdata", "first data", "payeezy", "clover", "clover.com",
+    # Fraud Detection & Risk Management
+    "sift science", "sift.com", "siftscience", "sift-science", "js.siftscience.com", "Sift.init", "_sift",
+    # Airwallex - Multi-currency Global Payments
+    "airwallex", "airwallex.com", "api.airwallex.com", "airwallex-js", "Airwallex.init", "airwallex-checkout",
+    # Stripe Treasury & Financial Operations
+    "stripe treasury", "stripe-treasury", "treasury.stripe.com", "stripe financial", "treasury-js",
 ]
 
 # --- EUROPEAN PROCESSORS ---
@@ -361,6 +367,12 @@ GATEWAYS_CRYPTO = [
     "wyre",
     "banxa",
     "alchemy pay",
+    # OKX Pay - Crypto Exchange Payments
+    "okx pay", "okxpay", "pay.okx.com", "okx-checkout", "okx-pay-button", "okx.com/pay",
+    # THORSwap - Decentralized Exchange
+    "thorswap", "thorswap.finance", "thorchain pay", "thorswap-widget", "tc-swap", "thor-bridge",
+    # LN Markets - Lightning Network Commerce
+    "lnmarkets.com", "ln markets", "lnm-", "lightning markets", "lightning-checkout", "ln-pay",
 ]
 
 # --- BUY NOW PAY LATER (BNPL) ---
@@ -430,6 +442,8 @@ GATEWAYS_B2B = [
     "bluevine",
     "kabbage",
     "ondeck",
+    # Block (formerly Square Cash for Business)
+    "block.xyz", "block-checkout", "block payments", "block-pay", "cdn.block.com/js",
 ]
 
 # --- DIGITAL WALLETS ---
@@ -535,7 +549,8 @@ GATEWAYS_PAYFAC = [
     "payouts.com",
     "hyperwallet",
     "trolley",
-    "wise business", "transferwise business",
+    # Wise Business - International B2B Transfers
+    "wise business", "wise-business", "transferwise business", "wise-commerce", "business.wise.com",
     # White-label
     "checkout.com", "cko-",
     "payroc",
@@ -551,6 +566,10 @@ GATEWAYS_PAYFAC = [
     "gravity payments",
     "payline data",
     "payment depot",
+    # Bolt - One-Click Checkout
+    "bolt.com", "bolt checkout", "cdn.bolt.com/checkout", "Bolt.checkout", "bolt-js", "bolt-button",
+    # Tripwire - Payment Orchestration
+    "tripwire.io", "tripwire payments", "tripwire-js", "tripwire-checkout", "api.tripwire.io",
 ]
 
 # --- E-COMMERCE PLATFORMS WITH PAYMENTS ---
