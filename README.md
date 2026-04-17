@@ -4,12 +4,12 @@ A production-ready Telegram bot for analyzing websites and identifying payment g
 
 ## 🌟 Key Features
 
-**Payment Gateway Detection**
-- Identifies 400+ payment gateways across 12 categories (Stripe, PayPal, Braintree, Adyen, Razorpay, Klarna, Crypto processors, BNPL, etc.)
+### Payment Gateway Detection
+- Identifies 400+ payment gateways across 12 categories (Stripe, PayPal, Braintree, Adyen, Razorpay, Klarna, crypto processors, BNPL, etc.)
 - Regional specialization: Global, Europe, APAC, Middle East/Africa, Latin America
 - 3-tier confidence scoring system (High: 0.95+, Medium: 0.70-0.85, Low: 0.40-0.50)
 
-**Security Analysis**
+### Security Analysis
 - 3D Secure/Verified by Visa detection
 - OTP/SMS verification requirements
 - CVV/CVC requirement status
@@ -17,7 +17,7 @@ A production-ready Telegram bot for analyzing websites and identifying payment g
 - Captcha system identification
 - Inbuilt payment system detection
 
-**Performance & Reliability**
+### Performance & Reliability
 - Persistent HTTP connection pooling (100 total, 10 per host)
 - DNS caching with 5-minute TTL
 - Result caching with 1-hour TTL
@@ -25,14 +25,14 @@ A production-ready Telegram bot for analyzing websites and identifying payment g
 - Retry logic with exponential backoff (3 attempts)
 - User agent rotation (100+ realistic agents)
 
-**User Management & Persistence**
+### User Management & Persistence
 - SQLite database with async operations
 - Atomic JSON writes for data integrity
 - In-memory caching with 60-second TTL
 - Subscription management (1d, 1m, 3m, 6m, 1y)
 - Automatic migration from JSON to SQLite
 
-**Rate Limiting & Security**
+### Rate Limiting & Security
 - Sliding window rate limiting (20 msgs/60s default)
 - Database persistence across restarts
 - Input sanitization and validation
@@ -42,7 +42,6 @@ A production-ready Telegram bot for analyzing websites and identifying payment g
 ## 🚀 Quick Start
 
 ### Prerequisites
-
 - Python 3.9+
 - Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
 - Owner User ID (from [@userinfobot](https://t.me/userinfobot))
@@ -95,13 +94,11 @@ A production-ready Telegram bot for analyzing websites and identifying payment g
 ## 🎯 Usage Examples
 
 ### Single URL Scan
-
 ```text
 /url https://example.com
 ```
 
 ### Multiple URLs Scan
-
 ```text
 /url stripe.com paypal.com square.com
 ```
@@ -109,7 +106,6 @@ A production-ready Telegram bot for analyzing websites and identifying payment g
 ### Bulk Scan from File
 
 1. Create a `.txt` file with URLs (one per line):
-
    ```text
    https://stripe.com
    https://paypal.com
@@ -121,29 +117,6 @@ A production-ready Telegram bot for analyzing websites and identifying payment g
 4. Wait for results with real-time progress tracking
 
 See [BULK_SCAN_GUIDE.md](BULK_SCAN_GUIDE.md) for detailed bulk scanning documentation.
-
-## 📋 Bot Commands
-
-### User Commands
-
-- `/start` - Welcome screen and quick start guide
-- `/register` - Activate bot access and create account
-- `/url <link>` - Scan one or more URLs (space or newline separated)
-- `/bulk` - Bulk scan URLs from .txt file (reply to uploaded file)
-- `/history` - View your recent scan history with pagination
-- `/subscription` - Check subscription status and expiry date
-- `/buy` - View subscription plans and payment info
-- `/help` - Command reference and detection guide
-- `/cancel` - Abort current operation
-
-### Owner Commands
-
-- `/stats` - View real-time bot usage statistics
-- `/broadcast` - Send message to all registered users
-- `/addsub <user_id> <duration>` - Grant subscription (e.g., `/addsub 12345 1m`)
-- `/auditlog` - View admin action audit log
-- `/cachestats` - View cache performance statistics
-- `/clearcache` - Clear result cache
 
 ## 📁 Architecture & Modules
 
@@ -165,6 +138,7 @@ See [BULK_SCAN_GUIDE.md](BULK_SCAN_GUIDE.md) for detailed bulk scanning document
 | `logger.py` | Centralized logging | Console + file output, UTF-8 encoding, context tracking |
 | `audit_log.py` | Admin action tracking | Database-backed audit trail, indexed queries |
 | `security.py` | Input validation | URL sanitization, text validation, dangerous scheme blocking |
+| `progress_tracker.py` | Bulk scan progress tracking | Real-time progress updates for bulk scans |
 | `user_agents.py` | User agent rotation | 100+ realistic browser/device combinations |
 
 ### Architecture Diagram
@@ -314,20 +288,6 @@ RATE_LIMIT_WINDOW=60
 
 ## 🧪 Testing
 
-### Test Files
-
-- `test_detection.py` - Detection accuracy (word boundaries, SDK patterns, confidence scoring)
-- `test_database.py` - Database operations and migrations
-- `test_cache.py` - Result caching functionality
-- `test_rate_limiter.py` - Rate limiting logic
-- `test_audit_log.py` - Audit logging
-- `test_integration.py` - End-to-end workflows
-- `test_security.py` - Input validation and sanitization
-- `test_url_normalization.py` - URL handling
-- `test_retry_logic.py` - Retry mechanism with backoff
-
-### Running Tests
-
 Tests use a custom runner (no pytest dependency):
 
 ```bash
@@ -340,6 +300,17 @@ python test_detection.py
 ```
 
 Tests print `[PASS]` or `[FAIL]` status.
+
+**Test Files:**
+- `test_detection.py` - Detection accuracy (word boundaries, SDK patterns, confidence scoring)
+- `test_database.py` - Database operations and migrations
+- `test_cache.py` - Result caching functionality
+- `test_rate_limiter.py` - Rate limiting logic
+- `test_audit_log.py` - Audit logging
+- `test_integration.py` - End-to-end workflows
+- `test_security.py` - Input validation and sanitization
+- `test_url_normalization.py` - URL handling
+- `test_retry_logic.py` - Retry mechanism with backoff
 
 ## ⚙️ Configuration
 
@@ -440,3 +411,5 @@ See `AGENTS.md` for detailed development guidelines including:
 - `AGENTS.md` - Development guidelines and code standards
 - `IMPLEMENTATION_GUIDE.md` - Feature implementation details
 - `QUICK_START.md` - Quick reference guide
+- `UI_RESEARCH_INDEX.md` - User interface research and examples
+- `GATEWAY_CHECKER_UI_EXAMPLES.md` - UI examples for the bot
