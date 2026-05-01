@@ -338,6 +338,7 @@ async def cmd_stats(message: Message):
 
     user_count = await async_get_user_count()
     rate_status = "✅ Enabled" if Config.ENABLE_RATE_LIMITING else "❌ Disabled"
+    rl_stats = rate_limiter.get_stats()
 
     stats_message = (
         "╭───────────────────────────╮\n"
@@ -358,11 +359,20 @@ async def cmd_stats(message: Message):
         "│\n"
         "└────────────────────────────\n"
         "\n"
+        "┌─ RATE LIMITER MEMORY ────\n"
+        "│\n"
+        f"│  Tracked Users  ›  {rl_stats['tracked_users']}\n"
+        f"│  Max Allowed    ›  {rl_stats['max_users']:,}\n"
+        f"│  Pending Writes ›  {rl_stats['dirty_users']}\n"
+        "│\n"
+        "└────────────────────────────\n"
+        "\n"
         "✨ System running smoothly"
         + get_footer()
     )
 
     await message.answer(stats_message)
+
 
 
 @router.message(Command("auditlog"))
@@ -695,6 +705,7 @@ async def cmd_addsub(message: Message):
                 "❌ Invalid duration format!\n\n"
                 "Valid formats:\n"
                 "  • 1d, 7d, 30d (days)\n"
+                "  • 1w, 2w (weeks)\n"
                 "  • 1m, 3m, 6m (months)\n"
                 "  • 1y, 2y (years)\n\n"
                 "Example: /addsub 123456789 1m"

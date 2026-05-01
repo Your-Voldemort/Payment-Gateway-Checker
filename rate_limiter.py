@@ -9,14 +9,22 @@ logger = setup_logger()
 
 
 class RateLimiter:
-    """Rate limiter with database persistence to survive bot restarts."""
+    """Rate limiter with database persistence and bounded memory usage."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        cleanup_interval: int = 3600,   # Cleanup every hour
+        max_tracked_users: int = 50_000  # Cap in-memory user tracking
+    ):
         self.user_requests: Dict[int, List[float]] = defaultdict(list)
         self._db_initialized = False
         self._dirty_users: set = set()  # Track users needing DB sync
-        self._flush_interval = 5  # Flush every 5 seconds
+        self._flush_interval = 5        # Flush every 5 seconds
         self._last_flush = time.time()
+        self.cleanup_interval = cleanup_interval
+        self.max_tracked_users = max_tracked_users
+        self._last_cleanup = time.time()
+        self._request_count = 0         # For periodic cleanup trigger
 
     async def _load_from_db(self, user_id: int):
         """Load rate limit state from database."""
@@ -92,6 +100,14 @@ class RateLimiter:
         if current_time - self._last_flush > self._flush_interval:
             await self._flush_dirty_users()
 
+        # Periodic memory cleanup (every 1000 requests or hourly)
+        self._request_count += 1
+        if self._request_count >= 1000 or (
+            current_time - self._last_cleanup > self.cleanup_interval
+        ):
+            self._cleanup_stale_entries(current_time)
+            self._request_count = 0
+
         return True
     
     def get_wait_time(self, user_id: int) -> int:
@@ -112,6 +128,62 @@ class RateLimiter:
         wait_time = Config.RATE_LIMIT_WINDOW - (current_time - oldest_request)
 
         return max(0, int(wait_time))
+
+    def _cleanup_stale_entries(self, current_time: float) -> None:
+        """
+        Remove stale user entries to prevent unbounded memory growth.
+
+        Removes users who have had no activity within the rate limit window.
+        If still over max_tracked_users, evicts oldest-activity users (LRU).
+
+        Args:
+            current_time: Current epoch time for cutoff calculation
+        """
+        cutoff = current_time - Config.RATE_LIMIT_WINDOW
+        stale_users = [
+            uid for uid, reqs in self.user_requests.items()
+            if not reqs or max(reqs) < cutoff
+        ]
+        for uid in stale_users:
+            del self.user_requests[uid]
+            self._dirty_users.discard(uid)
+
+        # If still over limit, evict oldest-activity users (LRU)
+        if len(self.user_requests) > self.max_tracked_users:
+            sorted_by_activity = sorted(
+                self.user_requests.items(),
+                key=lambda kv: max(kv[1]) if kv[1] else 0
+            )
+            excess = len(self.user_requests) - self.max_tracked_users
+            for uid, _ in sorted_by_activity[:excess]:
+                del self.user_requests[uid]
+                self._dirty_users.discard(uid)
+            logger.warning(
+                f"Rate limiter evicted {excess} LRU entries "
+                f"(max_tracked_users={self.max_tracked_users})"
+            )
+
+        if stale_users:
+            logger.debug(
+                f"Rate limiter cleanup: removed {len(stale_users)} stale entries, "
+                f"{len(self.user_requests)} users tracked"
+            )
+
+        self._last_cleanup = current_time
+
+    def get_stats(self) -> Dict[str, int]:
+        """
+        Get current rate limiter memory stats for monitoring.
+
+        Returns:
+            Dictionary with tracked_users, max_users, dirty_users counts
+        """
+        return {
+            "tracked_users": len(self.user_requests),
+            "max_users": self.max_tracked_users,
+            "dirty_users": len(self._dirty_users),
+            "cleanup_interval": self.cleanup_interval,
+        }
 
     async def _flush_dirty_users(self):
         """

@@ -3,6 +3,7 @@ import os
 import json
 import tempfile
 import time
+import threading
 from typing import Set, Dict, Any, Optional, List
 from datetime import datetime, timedelta
 from config import Config
@@ -59,26 +60,29 @@ class UserCache:
         self._cache: Optional[Set[int]] = None
         self._cache_time: float = 0
         self._ttl = ttl_seconds
-        self._lock_flag = False  # Simple lock to prevent race conditions
+        self._lock = threading.Lock()  # Proper thread-safe lock (replaces _lock_flag bool)
 
     def _is_expired(self) -> bool:
         """Check if cache has expired."""
         return time.time() - self._cache_time > self._ttl
 
     def _refresh_cache(self) -> Set[int]:
-        """Refresh cache from disk."""
-        if self._lock_flag:
-            # If another operation is in progress, return existing cache or empty set
-            return self._cache or set()
+        """
+        Refresh cache from disk with proper synchronization.
 
-        try:
-            self._lock_flag = True
+        Uses threading.Lock to ensure only one caller refreshes at a time.
+        Other callers wait and then benefit from the already-refreshed cache
+        via the double-checked locking pattern.
+        """
+        with self._lock:
+            # Double-check: another thread may have refreshed while we waited
+            if self._cache is not None and not self._is_expired():
+                return self._cache
+
             self._cache = _load_user_ids_from_disk()
             self._cache_time = time.time()
             logger.debug(f"User cache refreshed with {len(self._cache)} users")
             return self._cache
-        finally:
-            self._lock_flag = False
 
     def get_users(self) -> Set[int]:
         """Get all registered users (from cache if valid)."""
@@ -92,15 +96,17 @@ class UserCache:
 
     def invalidate(self):
         """Force cache invalidation (call after adding new user)."""
-        self._cache = None
-        self._cache_time = 0
+        with self._lock:
+            self._cache = None
+            self._cache_time = 0
         logger.debug("User cache invalidated")
 
     def add_user(self, user_id: int):
         """Add user to cache without full refresh."""
-        if self._cache is not None:
-            self._cache.add(user_id)
-            logger.debug(f"User {user_id} added to cache")
+        with self._lock:
+            if self._cache is not None:
+                self._cache.add(user_id)
+        logger.debug(f"User {user_id} added to cache")
 
 # Global cache instance
 _user_cache = UserCache(ttl_seconds=60)
@@ -532,6 +538,9 @@ def add_subscription(user_id: int, duration_str: str) -> Optional[str]:
         if duration_str.endswith('d'):
             days = int(duration_str[:-1])
             delta = timedelta(days=days)
+        elif duration_str.endswith('w'):
+            weeks = int(duration_str[:-1])
+            delta = timedelta(weeks=weeks)
         elif duration_str.endswith('m'):
             # Approximation: 30 days per month
             months = int(duration_str[:-1])

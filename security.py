@@ -87,10 +87,15 @@ def validate_duration(duration_str: str) -> bool:
     Validate subscription duration format.
     
     Args:
-        duration_str: Duration like "1d", "3m", "1y"
+        duration_str: Duration like "1d", "1w", "3m", "1y"
+        Supported suffixes:
+            d = days  (e.g. 7d)
+            w = weeks (e.g. 2w)
+            m = months (e.g. 3m)
+            y = years  (e.g. 1y)
     
     Returns:
         True if valid format
     """
-    pattern = r'^\d+[dmy]$'
+    pattern = r'^\d+[dwmy]$'
     return bool(re.match(pattern, duration_str.lower()))
