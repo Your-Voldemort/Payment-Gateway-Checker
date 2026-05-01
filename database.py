@@ -126,7 +126,20 @@ class Database:
                     expires_at TEXT NOT NULL
                 )
             """)
-            
+
+            # FSM state persistence table (replaces MemoryStorage)
+            # Keyed by (chat_id, user_id); stores current state name + JSON data blob.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS fsm_state (
+                    chat_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    state TEXT,
+                    data TEXT NOT NULL DEFAULT '{}',
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (chat_id, user_id)
+                )
+            """)
+
             # Indexes for performance
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_scan_history_user 

@@ -18,7 +18,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.filters import Command, StateFilter, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
+from fsm_storage import SQLiteStorage
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
@@ -2768,7 +2768,7 @@ async def main():
         token=Config.TELEGRAM_BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=None)  # Plain text mode
     )
-    dp = Dispatcher(storage=MemoryStorage())
+    dp = Dispatcher(storage=SQLiteStorage())
 
     # Include router
     dp.include_router(router)
