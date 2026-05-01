@@ -578,6 +578,63 @@ async def get_user_scan_history_paginated(
         return [], 0
 
 
+async def get_user_scan_history_all(user_id: int, limit: int = 1000) -> List[Dict[str, Any]]:
+    """
+    Fetch full scan history for a user (used for export).
+
+    Args:
+        user_id: The user whose history to fetch
+        limit: Maximum rows to return (default 1 000)
+
+    Returns:
+        List of scan result dicts with all available fields
+    """
+    db = await get_database()
+
+    try:
+        async with db.get_connection() as conn:
+            import json
+
+            cursor = await conn.execute("""
+                SELECT url, scanned_at, status_code, gateways_detected,
+                       security_type, cvv_status, cloudflare, captcha,
+                       inbuilt_payment, ecommerce_platform, cart_abandonment
+                FROM scan_history
+                WHERE user_id = ?
+                ORDER BY scanned_at DESC
+                LIMIT ?
+            """, (user_id, limit))
+
+            rows = await cursor.fetchall()
+
+            results = []
+            for row in rows:
+                try:
+                    gateways = json.loads(row[3]) if row[3] else []
+                except Exception:
+                    gateways = []
+
+                results.append({
+                    'url': row[0],
+                    'scanned_at': row[1],
+                    'status_code': row[2],
+                    'gateways': gateways,
+                    'security_type': row[4] or 'N/A',
+                    'cvv_status': row[5] or 'N/A',
+                    'cloudflare': bool(row[6]),
+                    'captcha': bool(row[7]),
+                    'inbuilt_payment': bool(row[8]),
+                    'ecommerce_platform': row[9] or 'None detected',
+                    'cart_abandonment': row[10] or 'None detected',
+                })
+
+            return results
+
+    except Exception as e:
+        logger.error(f"Error fetching scan history for export (user {user_id}): {e}")
+        return []
+
+
 async def get_gateway_statistics(gateway_name: str = None) -> Dict[str, Any]:
     """Get detection statistics for gateways."""
     db = await get_database()

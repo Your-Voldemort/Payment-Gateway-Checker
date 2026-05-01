@@ -842,6 +842,208 @@ async def cmd_history(message: Message):
     await message.answer(response + get_footer(), reply_markup=keyboard)
 
 
+@router.message(Command("export"))
+async def cmd_export(message: Message):
+    """Handle /export command — offer CSV, JSON, and TXT download options."""
+    user_id = message.from_user.id
+
+    if not await async_is_user_registered(user_id):
+        await message.answer(
+            "⚠️ Please /register first."
+            + get_footer()
+        )
+        return
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📊 CSV",  callback_data="export_csv"),
+            InlineKeyboardButton(text="📋 JSON", callback_data="export_json"),
+            InlineKeyboardButton(text="📄 TXT",  callback_data="export_txt"),
+        ],
+        [InlineKeyboardButton(text="🏠 Back", callback_data="back_main")],
+    ])
+
+    await message.answer(
+        "╭───────────────────────────╮\n"
+        "│   📤  EXPORT SCAN HISTORY │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        "Choose a format to download\n"
+        "your scan results:\n"
+        "\n"
+        "┌─ FORMATS ─────────────────\n"
+        "│\n"
+        "│  📊  CSV  — spreadsheet\n"
+        "│  📋  JSON — structured data\n"
+        "│  📄  TXT  — plain text\n"
+        "│\n"
+        "└────────────────────────────\n"
+        "\n"
+        "Up to 1 000 most recent scans."
+        + get_footer(),
+        reply_markup=keyboard,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Export helpers
+# ---------------------------------------------------------------------------
+
+async def _get_export_data(user_id: int) -> list:
+    """Fetch full scan history for export."""
+    from database import get_user_scan_history_all
+    return await get_user_scan_history_all(user_id)
+
+
+def _build_csv(rows: list) -> bytes:
+    """Build a UTF-8 CSV file from scan rows."""
+    import csv
+    import io
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=[
+        "url", "scanned_at", "status_code", "gateways",
+        "security_type", "cvv_status", "cloudflare", "captcha",
+        "inbuilt_payment", "ecommerce_platform", "cart_abandonment",
+    ])
+    writer.writeheader()
+    for r in rows:
+        writer.writerow({
+            **r,
+            "gateways": ", ".join(r["gateways"]) if r["gateways"] else "None",
+        })
+    return output.getvalue().encode("utf-8")
+
+
+def _build_json(rows: list) -> bytes:
+    """Build a pretty-printed JSON file from scan rows."""
+    import json
+    return json.dumps(rows, indent=2, ensure_ascii=False).encode("utf-8")
+
+
+def _build_txt(rows: list) -> bytes:
+    """Build a human-readable TXT report from scan rows."""
+    lines = [
+        "╔══════════════════════════════════════╗",
+        "║      GATEWAY HUNTER — SCAN EXPORT    ║",
+        f"║  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}             ║",
+        f"║  Total scans: {len(rows):<23}║",
+        "╚══════════════════════════════════════╝",
+        "",
+    ]
+    for i, r in enumerate(rows, 1):
+        # Format timestamp
+        try:
+            dt = datetime.fromisoformat(r["scanned_at"])
+            ts = dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            ts = r["scanned_at"]
+
+        gateways_str = ", ".join(r["gateways"]) if r["gateways"] else "None detected"
+        cf_str  = "Yes" if r["cloudflare"]       else "No"
+        cap_str = "Yes" if r["captcha"]           else "No"
+        inb_str = "Yes" if r["inbuilt_payment"]   else "No"
+
+        lines += [
+            f"┌─ SCAN #{i} ─────────────────────────────",
+            f"│  URL       : {r['url']}",
+            f"│  Scanned   : {ts}",
+            f"│  Status    : HTTP {r['status_code']}",
+            f"│  Gateways  : {gateways_str}",
+            f"│  Security  : {r['security_type']}",
+            f"│  CVV       : {r['cvv_status']}",
+            f"│  Cloudflare: {cf_str}",
+            f"│  Captcha   : {cap_str}",
+            f"│  Inbuilt   : {inb_str}",
+            f"│  Platform  : {r['ecommerce_platform']}",
+            f"│  Cart Tool : {r['cart_abandonment']}",
+            "└────────────────────────────────────────",
+            "",
+        ]
+
+    return "\n".join(lines).encode("utf-8")
+
+
+async def _send_export_file(
+    callback: CallbackQuery,
+    fmt: str,
+    data: bytes,
+    filename: str,
+    mime: str,
+    record_count: int = 0,
+) -> None:
+    """Send the export file to the user as a document."""
+    from aiogram.types import BufferedInputFile
+
+    await callback.answer()
+    processing = await callback.message.answer(
+        "⏳ Generating your export file..."
+    )
+
+    file = BufferedInputFile(data, filename=filename)
+    caption = (
+        f"📤 Your scan history export ({fmt.upper()})\n"
+        f"Records: {record_count}\n"
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    )
+    try:
+        await callback.message.answer_document(file, caption=caption)
+    finally:
+        try:
+            await processing.delete()
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Export callback handlers
+# ---------------------------------------------------------------------------
+
+@router.callback_query(F.data == "export_csv")
+async def callback_export_csv(callback: CallbackQuery):
+    """Export scan history as CSV."""
+    user_id = callback.from_user.id
+    rows = await _get_export_data(user_id)
+
+    if not rows:
+        await callback.answer("📭 No scan history to export.", show_alert=True)
+        return
+
+    data = _build_csv(rows)
+    filename = f"gateway_scans_{user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    await _send_export_file(callback, "CSV", data, filename, "text/csv", record_count=len(rows))
+
+
+@router.callback_query(F.data == "export_json")
+async def callback_export_json(callback: CallbackQuery):
+    """Export scan history as JSON."""
+    user_id = callback.from_user.id
+    rows = await _get_export_data(user_id)
+
+    if not rows:
+        await callback.answer("📭 No scan history to export.", show_alert=True)
+        return
+
+    data = _build_json(rows)
+    filename = f"gateway_scans_{user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    await _send_export_file(callback, "JSON", data, filename, "application/json", record_count=len(rows))
+
+
+@router.callback_query(F.data == "export_txt")
+async def callback_export_txt(callback: CallbackQuery):
+    """Export scan history as plain text report."""
+    user_id = callback.from_user.id
+    rows = await _get_export_data(user_id)
+
+    if not rows:
+        await callback.answer("📭 No scan history to export.", show_alert=True)
+        return
+
+    data = _build_txt(rows)
+    filename = f"gateway_scans_{user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    await _send_export_file(callback, "TXT", data, filename, "text/plain", record_count=len(rows))
+
+
 @router.message(Command("cancel"))
 async def cmd_cancel(message: Message, state: FSMContext):
     """Cancel any ongoing operation."""

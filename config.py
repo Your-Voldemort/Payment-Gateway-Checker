@@ -101,6 +101,11 @@ GATEWAYS_GLOBAL_MAJOR = [
     "airwallex", "airwallex.com", "api.airwallex.com", "airwallex-js", "Airwallex.init", "airwallex-checkout",
     # Stripe Treasury & Financial Operations
     "stripe treasury", "stripe-treasury", "treasury.stripe.com", "stripe financial", "treasury-js",
+    # AI & ML Service Payment Processors
+    "scale ai pay", "scale.com/pay", "scale-payment",
+    "together ai pay", "together-payment", "together.ai/pay",
+    "openai billing", "openai-billing", "platform.openai.com/account",
+    "anthropic billing", "claude-billing", "console.anthropic.com",
 ]
 
 # --- EUROPEAN PROCESSORS ---
@@ -154,7 +159,13 @@ GATEWAYS_EUROPE = [
     "swedbank pay", "swedbankpay", "payex",
     # SEB (Baltics)
     "sebpay",
-    # Stripe (Ireland) - duplicate for region clarity
+    # Europe - Additional Processors
+    "fondy", "fondy.ua", "fondy-checkout",
+    "edenred", "edenred.com", "edenred-pay",
+    "bluesnap europe", "bluesnap-eu",
+    "datatrans", "datatrans.ch", "datatrans-checkout",
+    "qiwi expansion", "qiwi-eu", "qiwi-europe",
+    "yandex kassa", "yandex-kassa", "kassa.yandex",
 ]
 
 # --- ASIA-PACIFIC PROCESSORS ---
@@ -232,6 +243,21 @@ GATEWAYS_APAC = [
     "fatzebra", "fat zebra",
     "pin payments", "pinpayments",
     "tyro", "tyro.com",
+    # India - Additional Payment Solutions
+    "phonepe switch", "bharat qr", "bharat-qr",
+    "yono sbi pay", "yonosbi", "sbi.yono", "sbi-checkout",
+    "icici imobile pay", "imobilepay", "imobile-checkout",
+    "google pay india", "gpay.in",
+    "amazon pay india", "amazonpay.in",
+    "hdfc smartbuy", "smartbuy.hdfc",
+    # Southeast Asia - Additional Platforms
+    "linkaja", "link aja", "linkaja.id", "link-aja-pay",
+    "seamoney", "sea money", "seamoney.com",
+    "true money", "truemoney", "truemoney.com", "truemoney-wallet",
+    "airasia pay", "airasia.com/pay", "airasia-checkout",
+    "boost malaysia", "boost-pay", "boost.com.my",
+    "dash", "dash.ubipay", "ubipay",
+    "instapay philippines", "instapay.ph", "instapay-checkout",
 ]
 
 # --- MIDDLE EAST & AFRICA ---
@@ -275,6 +301,21 @@ GATEWAYS_MEA = [
     "vodacom", "vodafone cash",
     "ecocash",
     "equitel",
+    # Africa - Additional Processors & Solutions
+    "remitly", "remitly.com", "remitly-checkout",
+    "worldremit", "world remit", "worldremit.com",
+    "paga", "paga.com", "pagapay", "paga-checkout",
+    "moov africa", "moov-pay", "moov.com",
+    "indicina", "indicina.com",
+    "okra.ai", "okra payments",
+    "fintech express", "ftxpress",
+    # Middle East - Additional Solutions
+    "hala", "hala.pay", "halapay",
+    "ziina", "ziina.com", "ziina-checkout",
+    "myfatoorah", "myfatoorah.com", "fatoorah-checkout",
+    "inswitch", "inswitch.me", "inswitch-payments",
+    "apptap", "app-tap-payments",
+    "gateway360", "360pay",
 ]
 
 # --- LATIN AMERICA ---
@@ -333,6 +374,13 @@ GATEWAYS_LATAM = [
     "culqi", "culqi.com",
     # Flow (Chile)
     "flow.cl", "flowpayments",
+    # Latin America - Additional Platforms
+    "mulpago", "mulpago.com", "mulpago-checkout",
+    "stoneco", "stone.com.br", "stone-checkout",
+    "ifthenpay", "ifthenpay.com",
+    "kuna payments", "kuna.io",
+    "tuum", "tuum.io", "tuum-payments",
+    "uala", "uala.com.ar", "uala-pay",
 ]
 
 # --- CRYPTOCURRENCY PAYMENT PROCESSORS ---
@@ -373,6 +421,10 @@ GATEWAYS_CRYPTO = [
     "thorswap", "thorswap.finance", "thorchain pay", "thorswap-widget", "tc-swap", "thor-bridge",
     # LN Markets - Lightning Network Commerce
     "lnmarkets.com", "ln markets", "lnm-", "lightning markets", "lightning-checkout", "ln-pay",
+    # Privacy & Monero Integration
+    "monero integration", "monero pay", "moneroj", "monero-checkout",
+    "zcash payments", "zcash-pay", "z.cash",
+    "haveno", "haveno-network", "haveno-pay",
 ]
 
 # --- BUY NOW PAY LATER (BNPL) ---
@@ -444,6 +496,13 @@ GATEWAYS_B2B = [
     "ondeck",
     # Block (formerly Square Cash for Business)
     "block.xyz", "block-checkout", "block payments", "block-pay", "cdn.block.com/js",
+    # SaaS Billing & Invoicing Updates
+    "chargify enterprise", "chargify-ent",
+    "zuora enterprise", "zuora-ent", "zuora-rev-rec",
+    "sage intacct", "sage-intacct", "intacct.com",
+    "infor cloudsuite", "infor-payments",
+    "oracle payments", "oracle-netsuite-payments",
+    "sap concur", "concur payments", "concur-pay",
 ]
 
 # --- DIGITAL WALLETS ---
@@ -507,6 +566,11 @@ GATEWAYS_SUBSCRIPTION = [
     "open collective",
     "github sponsors",
     "lemonsqueezy", "lemon squeezy",
+    # Wellness, Fitness & Membership Billing
+    "mindbody pay", "mindbody payments", "mindbody-checkout",
+    "zen planner", "zenplanner-pay", "zenplanner.com",
+    "classpass payments", "classpass-checkout", "classpass.com",
+    "virtuagym", "virtuagym-payments",
 ]
 
 # --- OPEN BANKING & ACCOUNT-TO-ACCOUNT ---
@@ -570,6 +634,13 @@ GATEWAYS_PAYFAC = [
     "bolt.com", "bolt checkout", "cdn.bolt.com/checkout", "Bolt.checkout", "bolt-js", "bolt-button",
     # Tripwire - Payment Orchestration
     "tripwire.io", "tripwire payments", "tripwire-js", "tripwire-checkout", "api.tripwire.io",
+    # Embedded Finance Platforms
+    "stripe embedded payments", "stripe-embedded", "embedded-payments-stripe",
+    "checkout unified payments", "checkout-unified", "checkout-embedded",
+    "dwolla embedded", "dwolla-embedded", "dwolla-api",
+    "plaid payment initiation", "plaid-payments", "plaid-embedded",
+    "finix embedded", "finix-checkout",
+    "marqeta", "marqeta.com", "marqeta-api",
 ]
 
 # --- E-COMMERCE PLATFORMS WITH PAYMENTS ---
@@ -642,6 +713,15 @@ GATEWAY_SIGNATURES = [
     "2checkout.com", "verifone.cloud",
 ]
 
+# --- GAMING & ENTERTAINMENT PAYMENT PROCESSORS ---
+GATEWAYS_GAMING = [
+    "xsolla", "xsolla.com", "xsolla-checkout", "xsolla-js",
+    "tencent pay", "tencent payments", "tenpay", "tencent-pay",
+    "vpay", "vpay.com", "v-pay",
+    "unity monetization", "unity-pay", "monetization.unity.com",
+    "unreal payments", "unreal monetization",
+]
+
 # --- COMBINE ALL GATEWAYS ---
 PAYMENT_GATEWAYS = (
     GATEWAYS_GLOBAL_MAJOR +
@@ -657,6 +737,7 @@ PAYMENT_GATEWAYS = (
     GATEWAYS_OPEN_BANKING +
     GATEWAYS_PAYFAC +
     GATEWAYS_ECOMMERCE +
+    GATEWAYS_GAMING +
     GATEWAY_SIGNATURES
 )
 

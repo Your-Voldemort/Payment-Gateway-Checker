@@ -294,6 +294,23 @@ SDK_PATTERNS: Dict[str, List[Tuple[str, float]]] = {
         (r'bolt-button', 0.90),
         (r'data-bolt-', 0.90),
     ],
+    # Airwallex
+    "Airwallex": [
+        (r'api\.airwallex\.com', 0.98),
+        (r'Airwallex\.init\(', 0.98),
+        (r'airwallex-checkout', 0.90),
+    ],
+    # Xsolla (Gaming)
+    "Xsolla": [
+        (r'xsolla\.com', 0.90),
+        (r'xsolla-checkout', 0.95),
+        (r'cdn\.xsolla\.com', 0.98),
+    ],
+    # Marqeta
+    "Marqeta": [
+        (r'marqeta\.com', 0.85),
+        (r'marqeta-api', 0.90),
+    ],
 }
 
 
@@ -406,6 +423,59 @@ WORD_BOUNDARY_GATEWAYS: List[Tuple[str, str, float]] = [
     (r'\bplaid\b', 'Plaid', 0.40),
     (r'\bgocardless\b', 'GoCardless', 0.50),
     (r'\btruelayer\b', 'TrueLayer', 0.50),
+
+    # Tier 2 — India Expansion
+    (r'\bbharat\s*qr\b', 'Bharat QR', 0.50),
+    (r'\byono\s*sbi\b', 'YONO SBI Pay', 0.50),
+    (r'\bicici\s*imobile\b', 'ICICI iMobile Pay', 0.50),
+
+    # Tier 2 — SEA Expansion
+    (r'\blinkaja\b', 'LinkAja', 0.50),
+    (r'\bseamoney\b', 'SeaMoney', 0.50),
+    (r'\btruemoney\b', 'TrueMoney', 0.50),
+    (r'\bairasia\s*pay\b', 'AirAsia Pay', 0.50),
+    (r'\bboost\s*malaysia\b', 'Boost Malaysia', 0.50),
+
+    # Tier 2 — Africa Expansion
+    (r'\bremitly\b', 'Remitly', 0.50),
+    (r'\bworldremit\b', 'WorldRemit', 0.50),
+    (r'\bpaga\b', 'Paga', 0.45),
+    (r'\bmoov\s*africa\b', 'Moov Africa', 0.50),
+
+    # Tier 2 — Middle East Expansion
+    (r'\bziina\b', 'Ziina', 0.50),
+    (r'\bmyfatoorah\b', 'MyFatoorah', 0.50),
+    (r'\bhala\s*pay\b', 'Hala Pay', 0.50),
+
+    # Tier 2 — Latin America Expansion
+    (r'\buala\b', 'Uala', 0.50),
+    (r'\bstoneco\b', 'Stone', 0.50),
+
+    # Tier 2 — Europe Expansion
+    (r'\bfondy\b', 'Fondy', 0.50),
+    (r'\bdatatrans\b', 'Datatrans', 0.50),
+
+    # Tier 3 — Gaming & Entertainment
+    (r'\bxsolla\b', 'Xsolla', 0.50),
+    (r'\btencent\s*pay\b', 'Tencent Pay', 0.50),
+    (r'\bunity\s*monetization\b', 'Unity Monetization', 0.50),
+
+    # Tier 3 — SaaS Billing
+    (r'\bsage\s*intacct\b', 'Sage Intacct', 0.50),
+    (r'\bsap\s*concur\b', 'SAP Concur', 0.50),
+    (r'\boracle\s*payments\b', 'Oracle Payments', 0.50),
+
+    # Tier 3 — Wellness
+    (r'\bmindbody\b', 'Mindbody', 0.45),
+    (r'\bclasspass\b', 'ClassPass', 0.45),
+
+    # Tier 3 — Embedded Finance
+    (r'\bmarqeta\b', 'Marqeta', 0.50),
+    (r'\bairwallex\b', 'Airwallex', 0.50),
+
+    # Tier 3 — Privacy / Crypto
+    (r'\bhaveno\b', 'Haveno', 0.50),
+    (r'\bzcash\s*payments\b', 'Zcash Payments', 0.50),
 ]
 
 
