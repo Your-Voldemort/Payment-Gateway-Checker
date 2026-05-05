@@ -17,6 +17,7 @@ from detection import (
 )
 from user_agents import get_random_user_agent
 from cache_manager import get_cached_result, save_to_cache
+from http_client import get_http_session
 from logger import setup_logger
 
 logger = setup_logger()
@@ -40,6 +41,11 @@ _curl_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix="curl_cffi
 MAX_RETRIES = 3
 RETRY_DELAY = 1  # seconds
 RETRY_BACKOFF = 2  # exponential backoff multiplier
+
+# Response streaming cap — payment SDKs always live in <head> / early <body>.
+# 512 KB is more than enough to capture them while preventing OOM on multi-MB
+# pages (news articles, documentation, etc.).
+MAX_RESPONSE_BYTES = 512_000  # 500 KB
 
 
 # =============================================================================
@@ -225,6 +231,52 @@ async def get_circuit_breaker_stats() -> Dict[str, dict]:
     return await _circuit_breaker.get_stats()
 
 
+async def _stream_response_text(
+    response: aiohttp.ClientResponse,
+    cap: int = MAX_RESPONSE_BYTES,
+) -> str:
+    """
+    Stream an aiohttp response body up to *cap* bytes, then decode to str.
+
+    Instead of loading the entire page into memory with ``response.text()``,
+    this reads chunks until either the response is exhausted or the cap is
+    reached.  Payment gateway SDKs and checkout widgets always appear in the
+    ``<head>`` or early ``<body>``, so 500 KB is sufficient for detection
+    while protecting against multi-megabyte pages.
+
+    Args:
+        response: An open ``aiohttp.ClientResponse`` inside its context manager.
+        cap: Maximum bytes to read (default: ``MAX_RESPONSE_BYTES``).
+
+    Returns:
+        Decoded HTML string (may be truncated).
+    """
+    chunks: list[bytes] = []
+    total = 0
+    truncated = False
+
+    async for chunk in response.content.iter_chunked(32_768):  # 32 KB read window
+        remaining = cap - total
+        if len(chunk) >= remaining:
+            chunks.append(chunk[:remaining])
+            total += remaining
+            truncated = True
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+
+    if truncated:
+        url_hint = str(response.url)[:60]
+        logger.warning(
+            f"Response body capped at {cap // 1024} KB for {url_hint} "
+            f"— page may be larger but detection only needs the early HTML."
+        )
+
+    raw = b"".join(chunks)
+    encoding = response.charset or "utf-8"
+    return raw.decode(encoding, errors="replace")
+
+
 def _fetch_with_curl_cffi(url: str, timeout: int = 15) -> Tuple[str, int, dict]:
     """
     Fetch URL using curl_cffi with Chrome browser impersonation.
@@ -377,11 +429,14 @@ async def check_url(
         "Sec-Ch-Ua-Platform": '"Windows"',
     }
 
-    # Create session if not provided
+    # Use the shared persistent connection pool if no session is passed.
+    # Previously this created a fresh aiohttp.ClientSession() (and a new TCP
+    # pool) on every call, leaking connections.  Now we always default to the
+    # module-level singleton from http_client.py.
     close_session = False
     if session is None:
-        session = aiohttp.ClientSession()
-        close_session = True
+        session = await get_http_session()  # Shared pool — never close this
+        close_session = False
 
     try:
         attempt_info = (
@@ -397,7 +452,9 @@ async def check_url(
             url, headers=headers, timeout=timeout, allow_redirects=True
         ) as response:
             response.raise_for_status()
-            text = await response.text()
+            # Stream up to MAX_RESPONSE_BYTES to avoid OOM on large pages.
+            # Detection targets (<head>, early <body>) are always in the first 500 KB.
+            text = await _stream_response_text(response)
 
             # Use the new optimized detection module
             # This provides word-boundary matching, SDK detection, and header analysis
@@ -521,6 +578,15 @@ async def check_url(
                         ) = await _async_fetch_with_curl_cffi(
                             url, timeout=Config.REQUEST_TIMEOUT
                         )
+
+                        # Apply the same size cap to curl_cffi responses.
+                        # curl_cffi returns the full body as a string; truncate
+                        # to MAX_RESPONSE_BYTES worth of characters.
+                        if len(text.encode("utf-8", errors="replace")) > MAX_RESPONSE_BYTES:
+                            text = text.encode("utf-8", errors="replace")[:MAX_RESPONSE_BYTES].decode("utf-8", errors="replace")
+                            logger.warning(
+                                f"curl_cffi response body capped at {MAX_RESPONSE_BYTES // 1024} KB for {url[:60]}"
+                            )
 
                         if curl_status == 200:
                             logger.info(
@@ -693,6 +759,7 @@ async def check_url(
         )
 
     finally:
-        # Close session if we created it
+        # close_session is always False now — we use the shared http_client.py
+        # singleton and must never close it.  Guard kept for safety.
         if close_session:
             await session.close()
