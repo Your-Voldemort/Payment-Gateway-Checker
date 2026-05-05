@@ -3,7 +3,9 @@
 import aiohttp
 import asyncio
 import time
-from typing import Tuple, List, Optional
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Dict, Tuple, List, Optional
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
 from config import Config
@@ -38,6 +40,189 @@ _curl_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix="curl_cffi
 MAX_RETRIES = 3
 RETRY_DELAY = 1  # seconds
 RETRY_BACKOFF = 2  # exponential backoff multiplier
+
+
+# =============================================================================
+# CIRCUIT BREAKER — per-domain failure isolation
+# =============================================================================
+
+class CircuitState(Enum):
+    """States for the circuit breaker state machine."""
+    CLOSED = "closed"        # Normal operation — requests flow through
+    OPEN = "open"            # Domain is dead — requests are blocked immediately
+    HALF_OPEN = "half_open"  # Cooldown elapsed — one probe request allowed
+
+
+# Circuit breaker configuration
+CB_FAILURE_THRESHOLD = 3    # consecutive failures before tripping OPEN
+CB_COOLDOWN_SECONDS  = 300  # 5 minutes before moving to HALF_OPEN
+CB_SUCCESS_THRESHOLD = 1    # successes in HALF_OPEN to close the circuit
+
+
+@dataclass
+class _DomainBreaker:
+    """
+    Per-domain circuit breaker state.
+
+    Tracks consecutive failure counts and timestamps to implement the
+    CLOSED → OPEN → HALF_OPEN → CLOSED state machine.
+    """
+    domain: str
+    state: CircuitState = CircuitState.CLOSED
+    consecutive_failures: int = 0
+    half_open_successes: int = 0
+    opened_at: float = 0.0        # monotonic timestamp when tripped OPEN
+    last_failure_at: float = 0.0  # monotonic timestamp of last failure
+
+    def is_open(self) -> bool:
+        """Check if circuit is blocking requests right now."""
+        if self.state == CircuitState.OPEN:
+            # Transition to HALF_OPEN once cooldown has elapsed
+            if time.monotonic() - self.opened_at >= CB_COOLDOWN_SECONDS:
+                self.state = CircuitState.HALF_OPEN
+                self.half_open_successes = 0
+                return False  # Allow the probe request
+            return True  # Still within cooldown — block
+        return False  # CLOSED or HALF_OPEN
+
+    def record_success(self) -> None:
+        """Record a successful request; close the circuit if thresholds are met."""
+        if self.state == CircuitState.HALF_OPEN:
+            self.half_open_successes += 1
+            if self.half_open_successes >= CB_SUCCESS_THRESHOLD:
+                self.state = CircuitState.CLOSED
+                self.consecutive_failures = 0
+                self.half_open_successes = 0
+        elif self.state == CircuitState.CLOSED:
+            # Reset consecutive counter on any success
+            self.consecutive_failures = 0
+
+    def record_failure(self) -> None:
+        """Record a failed request; open the circuit if threshold is reached."""
+        self.last_failure_at = time.monotonic()
+        if self.state == CircuitState.HALF_OPEN:
+            # Probe failed — immediately reopen
+            self.state = CircuitState.OPEN
+            self.opened_at = time.monotonic()
+            return
+        self.consecutive_failures += 1
+        if self.consecutive_failures >= CB_FAILURE_THRESHOLD:
+            self.state = CircuitState.OPEN
+            self.opened_at = time.monotonic()
+
+    def cooldown_remaining(self) -> float:
+        """Seconds until the circuit transitions to HALF_OPEN (0 if already there)."""
+        if self.state != CircuitState.OPEN:
+            return 0.0
+        elapsed = time.monotonic() - self.opened_at
+        return max(0.0, CB_COOLDOWN_SECONDS - elapsed)
+
+
+class _CircuitBreakerRegistry:
+    """
+    Thread/async-safe registry of per-domain circuit breakers.
+
+    Uses a single asyncio.Lock to protect concurrent access from multiple
+    bulk-scan tasks running in the same event loop.
+    """
+
+    def __init__(self) -> None:
+        self._breakers: Dict[str, _DomainBreaker] = {}
+        self._lock: Optional[asyncio.Lock] = None
+
+    def _get_lock(self) -> asyncio.Lock:
+        """Lazy-initialise the lock inside an active event loop."""
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
+
+    @staticmethod
+    def _domain(url: str) -> str:
+        """Extract the netloc (host + port) from a URL as the circuit key."""
+        parsed = urlparse(url)
+        return parsed.netloc.lower() or url.lower()
+
+    async def is_open(self, url: str) -> Tuple[bool, float]:
+        """
+        Check whether the circuit for this URL's domain is currently OPEN.
+
+        Args:
+            url: Full URL being requested
+
+        Returns:
+            (is_blocked, cooldown_remaining_seconds)
+        """
+        domain = self._domain(url)
+        async with self._get_lock():
+            breaker = self._breakers.get(domain)
+            if breaker is None:
+                return False, 0.0
+            blocked = breaker.is_open()
+            remaining = breaker.cooldown_remaining() if blocked else 0.0
+            return blocked, remaining
+
+    async def record_success(self, url: str) -> None:
+        """Notify the registry that a request to this URL's domain succeeded."""
+        domain = self._domain(url)
+        async with self._get_lock():
+            if domain in self._breakers:
+                self._breakers[domain].record_success()
+
+    async def record_failure(self, url: str) -> None:
+        """
+        Notify the registry that a request to this URL's domain failed.
+
+        Creates a new breaker entry for the domain if one does not exist yet.
+        """
+        domain = self._domain(url)
+        async with self._get_lock():
+            if domain not in self._breakers:
+                self._breakers[domain] = _DomainBreaker(domain=domain)
+            breaker = self._breakers[domain]
+            breaker.record_failure()
+            if breaker.state == CircuitState.OPEN:
+                logger.warning(
+                    f"Circuit OPENED for {domain} after "
+                    f"{breaker.consecutive_failures} consecutive failures. "
+                    f"Domain blocked for {CB_COOLDOWN_SECONDS}s."
+                )
+
+    async def reset(self, url: str) -> None:
+        """Manually reset the circuit for a domain (owner admin use)."""
+        domain = self._domain(url)
+        async with self._get_lock():
+            self._breakers.pop(domain, None)
+
+    async def get_stats(self) -> Dict[str, dict]:
+        """
+        Return a snapshot of all circuit breaker states for monitoring.
+
+        Returns:
+            Dict mapping domain -> state info dict
+        """
+        async with self._get_lock():
+            return {
+                domain: {
+                    "state": b.state.value,
+                    "consecutive_failures": b.consecutive_failures,
+                    "cooldown_remaining": round(b.cooldown_remaining()),
+                }
+                for domain, b in self._breakers.items()
+            }
+
+
+# Module-level singleton — shared across all check_url() calls
+_circuit_breaker = _CircuitBreakerRegistry()
+
+
+async def get_circuit_breaker_stats() -> Dict[str, dict]:
+    """
+    Public accessor for circuit breaker stats (used by /cbstats bot command).
+
+    Returns:
+        Dict mapping domain -> {state, consecutive_failures, cooldown_remaining}
+    """
+    return await _circuit_breaker.get_stats()
 
 
 def _fetch_with_curl_cffi(url: str, timeout: int = 15) -> Tuple[str, int, dict]:
@@ -90,6 +275,7 @@ async def check_url(
     Check the provided URL for payment gateways, security features, e-commerce platform, and cart abandonment tools.
     Includes automatic retry logic for transient failures (5xx errors, timeouts, connection errors).
     Supports result caching to reduce duplicate checks.
+    Integrates per-domain circuit breaker to skip known-dead domains immediately.
 
     Args:
         url: The URL to check
@@ -122,6 +308,31 @@ async def check_url(
             "None detected",
             "None detected",
         )
+
+    # -------------------------------------------------------------------------
+    # Circuit breaker check — skip domains that have been repeatedly failing.
+    # Only checked on the first attempt (retry_count == 0) to avoid blocking
+    # the retry logic that is already handling a live request sequence.
+    # -------------------------------------------------------------------------
+    if retry_count == 0:
+        is_blocked, cooldown_remaining = await _circuit_breaker.is_open(url)
+        if is_blocked:
+            domain = urlparse(url).netloc or url
+            logger.warning(
+                f"Circuit OPEN for {domain} — skipping request "
+                f"({int(cooldown_remaining)}s cooldown remaining)"
+            )
+            return (
+                [],
+                503,
+                False,
+                False,
+                f"Circuit Open: domain unreachable (retry in {int(cooldown_remaining)}s)",
+                "N/A",
+                "N/A",
+                "None detected",
+                "None detected",
+            )
 
     # Check cache first (now checks on retry attempts too for performance)
     if use_cache:
@@ -232,6 +443,9 @@ async def check_url(
                 f"Gateways: {len(analysis['gateways'])} "
                 f"(High confidence: {len(analysis['high_confidence_gateways'])})"
             )
+
+            # Successful response — reset circuit breaker for this domain
+            await _circuit_breaker.record_success(url)
 
             # Cache the result if successful (status 200) and caching is enabled
             if use_cache and response.status == 200:
@@ -401,6 +615,8 @@ async def check_url(
             await asyncio.sleep(delay)
             return await check_url(url, session, retry_count + 1, use_cache)
 
+        # All retries exhausted for 5xx — count as a circuit-breaker failure
+        await _circuit_breaker.record_failure(url)
         logger.error(f"HTTP error for {url} after {MAX_RETRIES} retries: {status_code}")
         return (
             [],
@@ -422,6 +638,8 @@ async def check_url(
             await asyncio.sleep(delay)
             return await check_url(url, session, retry_count + 1, use_cache)
 
+        # All retries exhausted on timeout — count as a circuit-breaker failure
+        await _circuit_breaker.record_failure(url)
         logger.error(f"Timeout for {url} after {MAX_RETRIES} retries")
         return (
             [],
@@ -443,6 +661,8 @@ async def check_url(
             await asyncio.sleep(delay)
             return await check_url(url, session, retry_count + 1, use_cache)
 
+        # All retries exhausted on connection error — trip the circuit breaker
+        await _circuit_breaker.record_failure(url)
         logger.error(
             f"Connection error for {url} after {MAX_RETRIES} retries: {str(conn_err)}"
         )

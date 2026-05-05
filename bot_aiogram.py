@@ -529,6 +529,120 @@ async def cmd_cache_stats(message: Message):
     await message.answer(stats_msg)
 
 
+@router.message(Command("cbstats"))
+async def cmd_cb_stats(message: Message):
+    """Handle /cbstats command (Owner only) - View circuit breaker states."""
+    if not is_owner(message.from_user.id):
+        await message.answer(
+            "╭───────────────────────────╮\n"
+            "│   🔒  ACCESS DENIED       │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "This command is owner-only."
+            + get_footer()
+        )
+        return
+
+    from gateway_checker import get_circuit_breaker_stats
+
+    stats = await get_circuit_breaker_stats()
+
+    if not stats:
+        await message.answer(
+            "╭───────────────────────────╮\n"
+            "│   ⚡  CIRCUIT BREAKERS    │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "✅ All circuits CLOSED\n"
+            "\n"
+            "No domains have tripped the\n"
+            "circuit breaker yet."
+            + get_footer()
+        )
+        return
+
+    # State emoji mapping
+    state_emoji = {
+        "closed": "🟢",
+        "open": "🔴",
+        "half_open": "🟡",
+    }
+
+    header = (
+        "╭───────────────────────────╮\n"
+        "│   ⚡  CIRCUIT BREAKERS    │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        f"Tracking {len(stats)} domain(s)\n"
+        "\n"
+        "┌─ DOMAIN STATUS ───────────\n"
+        "│\n"
+    )
+
+    body = ""
+    for domain, info in sorted(stats.items(), key=lambda x: x[1]["state"]):
+        emoji = state_emoji.get(info["state"], "⚪")
+        state_label = info["state"].upper().replace("_", " ")
+        failures = info["consecutive_failures"]
+        cooldown = info["cooldown_remaining"]
+
+        body += f"│  {emoji} {domain[:25]}\n"
+        body += f"│     State    › {state_label}\n"
+        body += f"│     Failures › {failures}\n"
+        if cooldown > 0:
+            body += f"│     Cooldown › {cooldown}s remaining\n"
+        body += "│\n"
+
+    footer_block = (
+        "└────────────────────────────\n"
+        "\n"
+        "💡 Use /cbreset <domain> to manually\n"
+        "   clear a tripped circuit."
+        + get_footer()
+    )
+
+    await message.answer(header + body + footer_block)
+
+
+@router.message(Command("cbreset"))
+async def cmd_cb_reset(message: Message):
+    """Handle /cbreset <domain> command (Owner only) - Manually reset a circuit breaker."""
+    if not is_owner(message.from_user.id):
+        return
+
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer(
+            "Usage: /cbreset <domain>\n"
+            "Example: /cbreset example.com\n\n"
+            "Use /cbstats to see tripped domains."
+        )
+        return
+
+    target = parts[1].strip()
+    # Normalise: strip any scheme so we just use the netloc
+    from urllib.parse import urlparse
+    parsed = urlparse(target if "://" in target else f"https://{target}")
+    domain = parsed.netloc.lower() or target.lower()
+
+    from gateway_checker import _circuit_breaker
+    await _circuit_breaker.reset(f"https://{domain}/")
+
+    logger.info(f"Owner {message.from_user.id} manually reset circuit for {domain}")
+    await message.answer(
+        "╭───────────────────────────╮\n"
+        "│   ✅  CIRCUIT RESET       │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        f"Circuit for {domain} has been\n"
+        "reset to CLOSED state.\n"
+        "\n"
+        "Next request to this domain\n"
+        "will go through normally."
+        + get_footer()
+    )
+
+
 @router.message(Command("clearcache"))
 async def cmd_clear_cache(message: Message):
     """Handle /clearcache command (Owner only) - Clear expired cache entries."""
