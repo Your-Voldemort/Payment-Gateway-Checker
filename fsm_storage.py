@@ -98,6 +98,7 @@ class SQLiteStorage(BaseStorage):
     async def get_state(self, key: StorageKey) -> Optional[str]:
         """Return the stored state name for *key*, or ``None``."""
         async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_table(db)
             cursor = await db.execute(
                 "SELECT state FROM fsm_state WHERE chat_id = ? AND user_id = ?",
                 (key.chat_id, key.user_id),
@@ -139,6 +140,7 @@ class SQLiteStorage(BaseStorage):
     async def get_data(self, key: StorageKey) -> Dict[str, Any]:
         """Return the stored data dict for *key* (empty dict if absent)."""
         async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_table(db)
             cursor = await db.execute(
                 "SELECT data FROM fsm_state WHERE chat_id = ? AND user_id = ?",
                 (key.chat_id, key.user_id),
