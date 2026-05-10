@@ -742,41 +742,69 @@ async def cmd_unratelimit(message: Message):
         await message.answer(invalid_msg)
         return
 
-    # Clear the rate limit
-    was_limited = await rate_limiter.clear_user_limit(target_user_id)
+    try:
+        # Clear the rate limit
+        was_limited = await rate_limiter.clear_user_limit(target_user_id)
 
-    if was_limited:
-        result_msg = (
+        if was_limited:
+            result_msg = (
+                "╭───────────────────────────╮\n"
+                "│   ✅  RATE LIMIT REMOVED  │\n"
+                "╰───────────────────────────╯\n"
+                "\n"
+                f"User {target_user_id} is no longer rate limited.\n"
+                "\n"
+                "They can now use the bot immediately."
+                + get_footer()
+            )
+
+            # Notify the target user
+            try:
+                await message.bot.send_message(
+                    target_user_id,
+                    "╭───────────────────────────╮\n"
+                    "│   ✅  RATE LIMIT REMOVED  │\n"
+                    "╰───────────────────────────╯\n"
+                    "\n"
+                    "Your rate limit has been cleared!\n"
+                    "\n"
+                    "You can now use the bot again. 🚀"
+                    + get_footer()
+                )
+            except Exception:
+                pass  # User may have blocked the bot
+
+        else:
+            result_msg = (
+                "╭───────────────────────────╮\n"
+                "│   ℹ️  NOT RATE LIMITED    │\n"
+                "╰───────────────────────────╯\n"
+                "\n"
+                f"User {target_user_id} was not currently rate limited.\n"
+                "\n"
+                "Any residual data has been cleared."
+                + get_footer()
+            )
+
+        await message.answer(result_msg)
+
+        # Log admin action
+        await log_admin_action(
+            admin_user_id=message.from_user.id,
+            action="unratelimit",
+            target_user_id=target_user_id,
+            details=f"Cleared rate limit (was_limited={was_limited})"
+        )
+
+    except Exception as e:
+        await message.answer(
             "╭───────────────────────────╮\n"
-            "│   ✅  RATE LIMIT REMOVED  │\n"
+            "│   ❌  ERROR               │\n"
             "╰───────────────────────────╯\n"
             "\n"
-            f"User {target_user_id} is no longer rate limited.\n"
-            "\n"
-            "They can now use the bot immediately."
+            f"Failed to clear rate limit: {str(e)}"
             + get_footer()
         )
-    else:
-        result_msg = (
-            "╭───────────────────────────╮\n"
-            "│   ℹ️  NOT RATE LIMITED    │\n"
-            "╰───────────────────────────╯\n"
-            "\n"
-            f"User {target_user_id} was not currently rate limited.\n"
-            "\n"
-            "Any residual data has been cleared."
-            + get_footer()
-        )
-
-    await message.answer(result_msg)
-
-    # Log admin action
-    await log_admin_action(
-        admin_user_id=message.from_user.id,
-        action="unratelimit",
-        target_user_id=target_user_id,
-        details=f"Cleared rate limit (was_limited={was_limited})"
-    )
 
 
 @router.message(Command("buy"))
