@@ -110,6 +110,43 @@ class RateLimiter:
 
         return True
     
+    async def clear_user_limit(self, user_id: int) -> bool:
+        """
+        Clear rate limit for a specific user, removing both in-memory
+        and database-persisted state.
+
+        Args:
+            user_id: The Telegram user ID to clear rate limit for
+
+        Returns:
+            bool: True if the user was rate-limited and has been cleared,
+                  False if the user was not rate-limited
+        """
+        was_limited = (
+            user_id in self.user_requests
+            and len(self.user_requests[user_id]) >= Config.RATE_LIMIT_MESSAGES
+        )
+
+        # Clear in-memory state
+        if user_id in self.user_requests:
+            del self.user_requests[user_id]
+        self._dirty_users.discard(user_id)
+
+        # Clear database state
+        try:
+            from database import delete_rate_limit_state
+            await delete_rate_limit_state(user_id)
+        except Exception as e:
+            logger.warning(f"Could not delete rate limit state from DB for user {user_id}: {e}")
+
+        if was_limited:
+            logger.info(f"Rate limit cleared for user {user_id}")
+            return True
+
+        # Even if not currently limited, clear any residual data
+        logger.info(f"Rate limit data cleared for user {user_id} (was not currently limited)")
+        return False
+
     def get_wait_time(self, user_id: int) -> int:
         """
         Get the remaining wait time for a rate-limited user.

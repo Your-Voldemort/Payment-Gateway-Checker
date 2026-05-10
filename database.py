@@ -736,6 +736,37 @@ async def load_rate_limit_state(user_id: int) -> List[float]:
         return []
 
 
+async def delete_rate_limit_state(user_id: int) -> bool:
+    """
+    Delete rate limit state from database for a specific user.
+
+    Args:
+        user_id: The Telegram user ID to clear rate limit for
+
+    Returns:
+        bool: True if a row was deleted, False otherwise
+    """
+    db = await get_database()
+
+    try:
+        async with db.get_connection() as conn:
+            cursor = await conn.execute(
+                "DELETE FROM rate_limits WHERE user_id = ?",
+                (user_id,)
+            )
+            deleted = cursor.rowcount
+            await conn.commit()
+
+            if deleted > 0:
+                logger.info(f"Deleted rate limit state for user {user_id}")
+                return True
+            return False
+
+    except Exception as e:
+        logger.error(f"Error deleting rate limit state for user {user_id}: {e}")
+        return False
+
+
 # ============================================================================
 # MIGRATION FUNCTION
 # ============================================================================

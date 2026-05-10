@@ -693,6 +693,92 @@ async def cmd_clear_cache(message: Message):
     await message.answer(result_msg)
 
 
+@router.message(Command("unratelimit"))
+async def cmd_unratelimit(message: Message):
+    """Handle /unratelimit command (Owner only) - Remove rate limit for a specific user."""
+    if not is_owner(message.from_user.id):
+        unauthorized_msg = (
+            "╭───────────────────────────╮\n"
+            "│   🔒  ACCESS DENIED       │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "This command is owner-only."
+            + get_footer()
+        )
+        await message.answer(unauthorized_msg)
+        return
+
+    # Parse target user_id from command args
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        usage_msg = (
+            "╭───────────────────────────╮\n"
+            "│   ⚠️  MISSING ARGUMENT    │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "Usage: /unratelimit <user_id>\n"
+            "\n"
+            "Example:\n"
+            "  /unratelimit 123456789"
+            + get_footer()
+        )
+        await message.answer(usage_msg)
+        return
+
+    target_id_str = args[1].strip()
+    try:
+        target_user_id = int(target_id_str)
+    except ValueError:
+        invalid_msg = (
+            "╭───────────────────────────╮\n"
+            "│   ❌  INVALID USER ID     │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            f"'{target_id_str}' is not a valid numeric user ID.\n"
+            "\n"
+            "Usage: /unratelimit <user_id>"
+            + get_footer()
+        )
+        await message.answer(invalid_msg)
+        return
+
+    # Clear the rate limit
+    was_limited = await rate_limiter.clear_user_limit(target_user_id)
+
+    if was_limited:
+        result_msg = (
+            "╭───────────────────────────╮\n"
+            "│   ✅  RATE LIMIT REMOVED  │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            f"User {target_user_id} is no longer rate limited.\n"
+            "\n"
+            "They can now use the bot immediately."
+            + get_footer()
+        )
+    else:
+        result_msg = (
+            "╭───────────────────────────╮\n"
+            "│   ℹ️  NOT RATE LIMITED    │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            f"User {target_user_id} was not currently rate limited.\n"
+            "\n"
+            "Any residual data has been cleared."
+            + get_footer()
+        )
+
+    await message.answer(result_msg)
+
+    # Log admin action
+    await log_admin_action(
+        admin_user_id=message.from_user.id,
+        action="unratelimit",
+        target_user_id=target_user_id,
+        details=f"Cleared rate limit (was_limited={was_limited})"
+    )
+
+
 @router.message(Command("buy"))
 async def cmd_buy(message: Message):
     """Handle /buy command showing subscription plans with buttons."""
