@@ -1,60 +1,66 @@
-# 🤖 Gateway Checker Bot - Payment Gateway Detection
+# Gateway Checker Bot
 
-A production-ready Telegram bot for analyzing websites and identifying payment gateways, security features, and protection systems. Built with async-first architecture, comprehensive detection capabilities, and enterprise-grade features.
+> **Payment gateway detection made simple.** Analyze websites and identify payment processors, security features, and protection systems with 400+ gateway signatures, 3-tier confidence scoring, and enterprise-grade reliability.
 
-## 🌟 Key Features
+[![Python 3.9+](https://img.shields.io/badge/Python-3.9+-3776ab?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![aiogram 3.x](https://img.shields.io/badge/aiogram-3.x-0088cc?style=flat-square)](https://docs.aiogram.dev/)
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
+[![Async-first](https://img.shields.io/badge/async--first-architecture-brightgreen?style=flat-square)](#-architecture)
+
+**Quick Links:** [Features](#-key-features) • [Getting Started](#-getting-started) • [Usage](#-usage) • [Architecture](#-architecture) • [Development](#-development)
+
+## ✨ Key Features
 
 ### Payment Gateway Detection
-- Identifies 400+ payment gateways across 12 categories (Stripe, PayPal, Braintree, Adyen, Razorpay, Klarna, crypto processors, BNPL, etc.)
-- Regional specialization: Global, Europe, APAC, Middle East/Africa, Latin America
-- 3-tier confidence scoring system (High: 0.95+, Medium: 0.70-0.85, Low: 0.40-0.50)
+
+- **400+ Gateway Signatures** across 12 categories (Stripe, PayPal, Braintree, Adyen, Razorpay, Klarna, crypto, BNPL, and more)
+- **Regional Specialization** for Global, Europe, APAC, Middle East/Africa, and Latin America
+- **3-Tier Confidence Scoring**: High (0.95+), Medium (0.70-0.85), Low (0.40-0.50)
+- **Fast Pattern Matching** with Aho-Corasick algorithm (10-20x faster than regex)
 
 ### Security Analysis
+
 - 3D Secure/Verified by Visa detection
 - OTP/SMS verification requirements
-- CVV/CVC requirement status
-- Cloudflare presence detection
+- CVV/CVC requirement analysis
+- Cloudflare & WAF detection
 - Captcha system identification
 - Inbuilt payment system detection
 
 ### Performance & Reliability
-- Persistent HTTP connection pooling (100 total, 10 per host)
-- DNS caching with 5-minute TTL
-- Result caching with 1-hour TTL
-- Aho-Corasick multi-pattern matching (10-20x faster than regex)
-- Retry logic with exponential backoff (3 attempts)
-- User agent rotation (100+ realistic agents)
 
-### User Management & Persistence
-- SQLite database with async operations
-- Atomic JSON writes for data integrity
-- In-memory caching with 60-second TTL
-- Subscription management (1d, 1m, 3m, 6m, 1y)
-- Automatic migration from JSON to SQLite
+- **Persistent HTTP connection pooling** (100 total, 10 per host)
+- **DNS caching** with 5-minute TTL
+- **Result caching** with 1-hour TTL
+- **Retry logic** with exponential backoff (3 attempts)
+- **User agent rotation** with 100+ realistic agents
 
-### Rate Limiting & Security
-- Sliding window rate limiting (20 msgs/60s default)
-- Database persistence across restarts
-- Input sanitization and validation
-- Dangerous scheme blocking
-- Comprehensive audit logging
+### Enterprise Features
 
-## 🚀 Quick Start
+- **SQLite database** with async operations and scan history
+- **Rate limiting** with sliding window (20 msgs/60s default)
+- **Subscription management** (1d, 1m, 3m, 6m, 1y plans)
+- **Audit logging** for admin actions
+- **Bulk scanning** with real-time progress tracking
+- **Atomic file operations** for data integrity
+
+## 🚀 Getting Started
 
 ### Prerequisites
-- Python 3.9+
-- Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
-- Owner User ID (from [@userinfobot](https://t.me/userinfobot))
+
+- **Python 3.9+**
+- **Telegram Bot Token** (create at [@BotFather](https://t.me/BotFather))
+- **Owner User ID** (find at [@userinfobot](https://t.me/userinfobot))
 
 ### Installation
 
-1. Clone the repository:
+1. **Clone the repository**
    ```bash
    git clone <repository-url>
    cd gateway-checker
    ```
 
-2. Create and activate virtual environment:
+2. **Create virtual environment**
    ```bash
    # Windows
    python -m venv tgbot
@@ -65,12 +71,12 @@ A production-ready Telegram bot for analyzing websites and identifying payment g
    source tgbot/bin/activate
    ```
 
-3. Install dependencies:
+3. **Install dependencies**
    ```bash
    pip install -r requirements.txt
    ```
 
-4. Configure environment:
+4. **Configure environment**
    ```bash
    cp .env.example .env
    ```
@@ -86,19 +92,21 @@ A production-ready Telegram bot for analyzing websites and identifying payment g
    RATE_LIMIT_WINDOW=60
    ```
 
-5. Run the bot:
+5. **Run the bot**
    ```bash
    python bot_aiogram.py
    ```
 
-## 🎯 Usage Examples
+The bot will automatically initialize the SQLite database and migrate any existing user data.
+
+## 💡 Usage
 
 ### Single URL Scan
 ```text
 /url https://example.com
 ```
 
-### Multiple URLs Scan
+### Multiple URLs (up to 10)
 ```text
 /url stripe.com paypal.com square.com
 ```
@@ -106,211 +114,162 @@ A production-ready Telegram bot for analyzing websites and identifying payment g
 ### Bulk Scan from File
 
 1. Create a `.txt` file with URLs (one per line):
-   ```text
+   ```
    https://stripe.com
    https://paypal.com
-   https://square.com/checkout
+   https://square.com
    ```
 
 2. Upload the file to the bot
-3. Reply to the file with `/bulk`
-4. Wait for results with real-time progress tracking
+3. Reply with `/bulk`
+4. Monitor real-time progress
 
-See [BULK_SCAN_GUIDE.md](BULK_SCAN_GUIDE.md) for detailed bulk scanning documentation.
+For detailed bulk scanning instructions, see `QUICK_START.md`.
 
-## 📁 Architecture & Modules
+## 🏗️ Architecture
 
-### Core Modules
+### Core Design
+
+The bot uses an **async-first architecture** built on:
+- **aiogram 3.x** for Telegram bot framework
+- **aiohttp** for HTTP requests with persistent connection pooling
+- **aiosqlite** for async database operations
+- **BeautifulSoup 4** for HTML parsing
+
+### Module Overview
 
 | Module | Purpose | Key Features |
 |--------|---------|--------------|
-| `bot_aiogram.py` | Main entry point (aiogram 3.x) | Native async, FSM state management, inline keyboards, middleware support |
-| `gateway_checker.py` | URL checking orchestrator | Async HTTP requests, retry logic (3 attempts), result caching, user agent rotation |
-| `detection.py` | Payment gateway detection engine | 3-tier confidence scoring, SDK pattern matching, security feature detection |
-| `html_parser.py` | Structured HTML analysis | BeautifulSoup parsing of scripts, forms, iframes, input fields |
-| `config.py` | Configuration management | 400+ payment gateway patterns, environment variables, subscription settings |
-| `user_manager.py` | User registration & caching | JSON storage with atomic writes, in-memory cache (60s TTL), database fallback |
-| `database.py` | SQLite persistence layer | Async operations, user management, scan history, rate limits, gateway stats |
-| `http_client.py` | Connection pooling | Singleton HTTP client, persistent aiohttp.ClientSession, DNS caching |
-| `rate_limiter.py` | Request throttling | Sliding window algorithm, database persistence, per-user limits |
-| `pattern_matcher.py` | Multi-pattern matching | Aho-Corasick algorithm (10-20x faster), regex fallback |
-| `async_manager.py` | Sync-to-async bridge | Background event loop for legacy sync handlers |
-| `logger.py` | Centralized logging | Console + file output, UTF-8 encoding, context tracking |
-| `audit_log.py` | Admin action tracking | Database-backed audit trail, indexed queries |
-| `security.py` | Input validation | URL sanitization, text validation, dangerous scheme blocking |
-| `progress_tracker.py` | Bulk scan progress tracking | Real-time progress updates for bulk scans |
-| `user_agents.py` | User agent rotation | 100+ realistic browser/device combinations |
+| **bot_aiogram.py** | Main entry point (2873 lines) | FSM state management, native async, inline keyboards |
+| **detection.py** | Detection engine (1197 lines) | 3-tier confidence scoring, SDK patterns, security analysis |
+| **gateway_checker.py** | URL orchestrator | HTTP requests, caching, retry logic, result aggregation |
+| **html_parser.py** | HTML analysis (744 lines) | BeautifulSoup parsing of scripts, forms, iframes |
+| **config.py** | Configuration (400+ signatures) | Gateway patterns, categories, environment config |
+| **database.py** | SQLite layer | Async operations, user mgmt, scan history, statistics |
+| **user_manager.py** | User registration | Atomic JSON writes, in-memory cache (60s TTL), migration |
+| **http_client.py** | Connection pooling | Singleton aiohttp.ClientSession, DNS caching |
+| **rate_limiter.py** | Request throttling | Sliding window algorithm, persistent storage |
+| **pattern_matcher.py** | Multi-pattern search | Aho-Corasick (10-20x faster), regex fallback |
+| **cache_manager.py** | Result caching | TTL-based expiration, cache invalidation |
+| **security.py** | Input validation | URL sanitization, dangerous scheme blocking |
+| **audit_log.py** | Action tracking | Database-backed audit trail, indexed queries |
+| **logger.py** | Logging | Console + file output, context tracking |
 
-### Architecture Diagram
+### Data Flow
 
 ```
 User (Telegram)
     ↓
-bot_aiogram.py (aiogram 3.x)
-    ├─ FSM State Management
-    ├─ Rate Limiter (rate_limiter.py)
-    └─ URL Scanning
-        ↓
-    gateway_checker.py
-        ├─ Cache Check (cache_manager.py)
-        ├─ HTTP Request (http_client.py)
-        │   └─ Connection Pool (persistent aiohttp.ClientSession)
-        └─ Analysis
-            ├─ HTML Parsing (html_parser.py)
-            ├─ Detection (detection.py)
-            │   ├─ SDK Patterns (High Confidence: 0.95+)
-            │   ├─ HTML Structure (Medium Confidence: 0.70-0.85)
-            │   └─ Keyword Matching (Low Confidence: 0.40-0.50)
-            └─ Security Analysis (utils.py)
-                ├─ Cloudflare Detection
-                ├─ Captcha Detection
-                └─ 3D Secure Detection
-        ↓
-    Result Storage
-        ├─ Cache (cache_manager.py)
-        └─ Database (database.py)
-        ↓
-    User Response (Telegram)
+bot_aiogram.py (FSM + Rate Limiter)
+    ↓
+gateway_checker.py (Orchestrator)
+    ├─ Cache Check (cache_manager.py)
+    ├─ HTTP Request (http_client.py) → Connection Pool
+    └─ Analysis
+        ├─ HTML Parsing (html_parser.py)
+        ├─ Detection (detection.py)
+        │   ├─ SDK Patterns (High Confidence: 0.95+)
+        │   ├─ HTML Structure (Medium: 0.70-0.85)
+        │   └─ Keywords (Low: 0.40-0.50)
+        └─ Security Checks
+    ↓
+Result Storage
+    ├─ Cache (cache_manager.py)
+    └─ Database (database.py)
+    ↓
+Telegram Response
 ```
 
 ## 🔍 Detection System
 
 ### 3-Tier Confidence Scoring
 
-**High Confidence (0.95+)**
-- JavaScript SDK includes: `js.stripe.com/v3`, `paypal.com/sdk/js`
+**High Confidence (0.95+)**: SDK detection with < 1% false positive rate
+- JavaScript SDK URLs: `js.stripe.com/v3`, `paypal.com/sdk/js`
 - SDK initialization: `Stripe('pk_live_...')`, `PayPal.Buttons()`
-- Specific code patterns: `stripe.elements()`, `braintree.hostedFields`
-- False positive rate: < 1%
+- Code patterns: `stripe.elements()`, `braintree.hostedFields`
 
-**Medium Confidence (0.70-0.85)**
-- Form attributes: `action="/paypal/checkout"`, `data-braintree-id`
-- HTML structure: iframe sources, input field types
-- Data attributes: `data-stripe-key`, `data-paypal-button`
-- Requires structured HTML parsing
+**Medium Confidence (0.70-0.85)**: Structured HTML analysis
+- Form attributes: `action="/paypal/checkout"`
+- HTML structure: iframe sources, data attributes
+- Input fields: type and data-* attributes
 
-**Low Confidence (0.40-0.50)**
-- Keyword matching with word boundaries: `\bstripe\b` (matches "stripe" but not "pinstripe")
+**Low Confidence (0.40-0.50)**: Keyword matching (prone to false positives)
+- Word boundary patterns: `\bstripe\b` (matches "stripe" but not "pinstripe")
 - Text mentions: "Powered by Authorize.net"
-- Generic patterns prone to false positives
 
-### Optimization: Aho-Corasick Algorithm
+### Gateway Categories
 
-If `pyahocorasick` is installed, the bot uses it for multi-pattern searching:
-- 10-20x faster than sequential regex matching
+The bot detects gateways across 12 specialized categories:
+
+1. **Global Major** - Stripe, PayPal, Braintree, Adyen, Checkout.com, Worldpay, Square, Authorize.Net
+2. **Europe** - Mollie, Klarna, SagePay, Worldline, Nexi, Trustly, Giropay, Przelewy24
+3. **APAC** - Razorpay, Paytm, 2Checkout, Cashfree, PayU, Alipay, WeChat Pay
+4. **Middle East/Africa** - Telr, HyperPay, PayU
+5. **Latin America** - Mercado Pago, Conekta, Openpay, PayU
+6. **Cryptocurrency** - Coinbase Commerce, BTCPay, Binance Pay, Crypto.com
+7. **BNPL** - Klarna, Affirm, Afterpay, Sezzle
+8. **B2B Payments** - Bill.com, Tipalti, Coupa, Concur
+9. **Digital Wallets** - Apple Pay, Google Pay, Alipay, WeChat Pay
+10. **Subscription** - Stripe Billing, Recurly, Zuora, Chargify
+11. **Open Banking** - Plaid, Yodlee, Finicity, Trustly
+12. **PayFacs** - Stripe Connect, PayPal Commerce Platform, Square Marketplace
+
+### Pattern Matching
+
+When `pyahocorasick` is installed (optional):
+- **10-20x faster** multi-pattern searching
 - Graceful fallback to regex if library unavailable
-- Significantly reduces CPU usage on large HTML files
-
-### Payment Gateway Categories
-
-The bot detects gateways across 12 categories:
-
-1. **Global Major Processors**: Stripe, PayPal, Braintree, Adyen, Checkout.com, Worldpay, Square, Authorize.Net, CyberSource, Global Payments, Fiserv
-2. **European Processors**: Mollie, Klarna, SagePay, Worldline, Nexi, Trustly, iDEAL, Sofort, Giropay, Bancontact, Przelewy24, Paysera
-3. **APAC Processors**: Razorpay, Paytm, 2Checkout, Instamojo, Billdesk, Cashfree, PayU, Alipay, WeChat Pay
-4. **Middle East/Africa**: 2Checkout, PayU, Telr, HyperPay, Telcell
-5. **Latin America**: PayU, 2Checkout, Mercado Pago, Conekta, Openpay
-6. **Cryptocurrency**: Coinbase Commerce, BTCPay, Crypto.com, Binance Pay, Phantom Wallet
-7. **BNPL (Buy Now Pay Later)**: Klarna, Affirm, Afterpay, Sezzle, Laybuy
-8. **B2B Payments**: Bill.com, Tipalti, Coupa, Concur
-9. **Digital Wallets**: Apple Pay, Google Pay, Samsung Pay, Alipay, WeChat Pay
-10. **Subscription Billing**: Stripe Billing, Recurly, Zuora, Chargify
-11. **Open Banking**: Plaid, Yodlee, Finicity, Trustly
-12. **PayFacs**: Stripe Connect, PayPal Commerce Platform, Square Marketplace
+- Significantly reduces CPU on large HTML files
 
 ## 💾 Data Persistence
 
 ### SQLite Database
 
-Async database operations using `aiosqlite`:
+Async database layer with `aiosqlite` provides:
 
-**Tables:**
-- **users**: User registration, subscription expiry, migration tracking
-- **scan_history**: URL scans with detected gateways, security info, timestamps
-- **rate_limits**: Request timestamps for persistence across restarts
-- **gateway_stats**: Aggregated detection statistics
-- **scan_cache**: Result caching with TTL-based expiration
-- **audit_log**: Admin action tracking (broadcasts, subscriptions)
+| Table | Purpose |
+|-------|---------|
+| **users** | Registration, subscriptions, migration tracking |
+| **scan_history** | URL scans, detected gateways, timestamps |
+| **rate_limits** | Request tracking for persistence across restarts |
+| **gateway_stats** | Aggregated detection statistics |
+| **scan_cache** | Result caching with TTL-based expiration |
+| **audit_log** | Admin actions and audit trail |
 
-### User Storage
+### User Storage with Atomic Writes
 
-**Atomic JSON Writes:**
-1. Data serialized to string
-2. Written to temporary file (`.tmp`)
-3. `os.replace()` atomically replaces old file
-4. Prevents corruption during simultaneous writes
+**Atomic JSON Writes** prevent corruption during simultaneous writes:
+```python
+# 1. Serialize to temp file
+# 2. Use os.replace() for atomic swap
+# 3. Survives power loss during write
+```
 
 **In-Memory Cache:**
-- Registered user IDs stored in memory Set
+- Registered user IDs in memory
 - 60-second TTL (configurable)
-- Automatic invalidation on new registrations
-- Reduces disk I/O by 90%+
+- Automatic invalidation on registration
+- ~90% reduction in disk I/O
 
 **Automatic Migration:**
-- JSON to SQLite migration on startup
-- Backup of old JSON files
+- JSON → SQLite migration on startup
+- Old JSON backed up
 - Graceful fallback if database unavailable
 
 ## 🚦 Rate Limiting
 
 **Sliding Window Algorithm:**
 - Tracks request timestamps per user
-- Cleans up old timestamps outside window
+- Cleans old timestamps outside window
+- Persists to database (survives restarts)
 - Default: 20 messages per 60 seconds
-- Database persistence survives bot restarts
 
-**Configuration:**
 ```env
 ENABLE_RATE_LIMITING=true
 RATE_LIMIT_MESSAGES=20
 RATE_LIMIT_WINDOW=60
 ```
-
-## 🔐 Security Features
-
-**Input Validation:**
-- URL sanitization (removes dangerous schemes)
-- Text input validation
-- Dangerous scheme blocking (javascript:, data:, vbscript:)
-- Suspicious pattern detection (script tags, eval, path traversal)
-
-**Telegram Message Safety:**
-- Plain text with Unicode emojis (no Markdown for dynamic content)
-- Markdown escaping for user-provided data
-- Message splitting for content >4096 characters
-- Box-drawing characters for visual formatting
-
-**Audit Logging:**
-- Database-backed audit trail
-- Tracks admin actions (broadcasts, subscriptions)
-- Indexed for performance
-- Queryable by admin user, action type, timestamp
-
-## 🧪 Testing
-
-Tests use a custom runner (no pytest dependency):
-
-```bash
-# Run all detection tests
-python test_detection.py
-
-# Run specific test
-# Edit test_detection.py main() to call desired test, then:
-python test_detection.py
-```
-
-Tests print `[PASS]` or `[FAIL]` status.
-
-**Test Files:**
-- `test_detection.py` - Detection accuracy (word boundaries, SDK patterns, confidence scoring)
-- `test_database.py` - Database operations and migrations
-- `test_cache.py` - Result caching functionality
-- `test_rate_limiter.py` - Rate limiting logic
-- `test_audit_log.py` - Audit logging
-- `test_integration.py` - End-to-end workflows
-- `test_security.py` - Input validation and sanitization
-- `test_url_normalization.py` - URL handling
-- `test_retry_logic.py` - Retry mechanism with backoff
 
 ## ⚙️ Configuration
 
@@ -340,7 +299,7 @@ RATE_LIMIT_WINDOW=60
 **User Agent Rotation:**
 ```env
 USER_AGENT_ROTATION=true
-USER_AGENT_TYPE=all  # all, desktop, mobile, chrome, firefox, etc.
+USER_AGENT_TYPE=all  # all, desktop, mobile, chrome, firefox
 ```
 
 **Subscription & Payments:**
@@ -350,66 +309,246 @@ LTC_ADDRESS=ltc1q8sfrqzsahn7a0gcx6h5304ljf08k4vqvq04sau
 USDT_TRC20_ADDRESS=TJpx8Knpv6toy2QKqWdt64W2HxVt7q8gef
 ```
 
-**File Paths:**
-```env
-USER_IDS_FILE=user_ids.txt
-LOG_FILE=bot.log
+## 🔒 Security
+
+### Input Validation
+
+- URL sanitization (removes dangerous schemes)
+- Text input validation
+- Dangerous scheme blocking: `javascript:`, `data:`, `vbscript:`
+- Suspicious pattern detection
+
+### Message Safety
+
+- Plain text responses with Unicode emojis (no Markdown for dynamic content)
+- Message splitting for large responses (>4096 chars)
+- Box-drawing Unicode for visual formatting
+- No execution of user-provided code
+
+### Audit Logging
+
+- Database-backed audit trail
+- Tracks admin actions (broadcasts, subscriptions)
+- Indexed for performance
+- Queryable by admin, action type, timestamp
+
+## 📊 Performance
+
+| Metric | Value |
+|--------|-------|
+| HTTP Connections | 100 total, 10 per host |
+| DNS Cache TTL | 5 minutes |
+| Result Cache TTL | 1 hour |
+| Pattern Matching | 10-20x faster with Aho-Corasick |
+| Retry Attempts | 3 with exponential backoff |
+| User Agent Pool | 100+ realistic agents |
+
+## 🧪 Testing
+
+Custom test runner (no pytest dependency):
+
+```bash
+# Run detection tests
+python test_bugs_comprehensive.py
+
+# Tests output [PASS] or [FAIL]
 ```
 
-### Subscription Plans
+Test coverage includes:
+- Detection accuracy and confidence scoring
+- Database operations and migrations
+- Result caching and TTL
+- Rate limiting logic
+- Audit logging
+- Input validation and security
+- URL normalization
+- Retry mechanism with backoff
 
+## 📖 Development
+
+The project includes comprehensive development documentation:
+
+- **`AGENTS.md`** - Code style, naming conventions, async patterns, type hints
+- **`QUICK_START.md`** - Fast reference for installation and setup
+- **`IMPROVEMENTS.md`** - Performance optimization notes
+- **`gate_implement.md`** - Feature implementation details
+
+### Code Standards
+
+**Import order** (3 groups with blank lines):
 ```python
-{
-    "1d": {"name": "1 Day", "price": "$5"},
-    "1m": {"name": "1 Month", "price": "$20"},
-    "3m": {"name": "3 Months", "price": "$50"},
-    "6m": {"name": "6 Months", "price": "$90"},
-    "1y": {"name": "1 Year", "price": "$150"}
-}
+# Standard library
+import os, re, asyncio
+
+# Third-party
+import aiohttp
+from bs4 import BeautifulSoup
+
+# Local modules
+from config import Config
+from logger import setup_logger
 ```
 
-## 📊 Performance Characteristics
+**Naming conventions:**
+- Functions: `snake_case` (`check_url`, `find_payment_gateways`)
+- Classes: `PascalCase` (`Config`, `RateLimiter`)
+- Constants: `UPPER_SNAKE_CASE` (`PAYMENT_GATEWAYS`, `SDK_PATTERNS`)
+- Private: `_leading_underscore` (`_cache`)
 
-**HTTP Connection Pooling:**
-- Total connections: 100
-- Per-host connections: 10
-- Keep-alive: 30 seconds
-- DNS cache TTL: 5 minutes
+**Type hints** (mandatory):
+```python
+def check_url(url: str) -> Tuple[List[str], int, bool]:
+    ...
+```
 
-**Caching:**
-- Result cache TTL: 1 hour
-- User cache TTL: 60 seconds
-- Reduces duplicate checks by 70%+
+**Docstrings** (Google-style for public functions):
+```python
+def analyze_url_response(html: str, headers: dict) -> dict:
+    """
+    Analyze URL response for payment gateways.
+    
+    Args:
+        html: HTML content
+        headers: Response headers
+        
+    Returns:
+        Dict with keys: gateways, confidence_scores, cloudflare
+    """
+```
 
-**Pattern Matching:**
-- Aho-Corasick: 10-20x faster than regex
-- 400+ gateway patterns
-- Graceful regex fallback
+## 🛠️ Common Tasks
 
-**Retry Logic:**
-- Max retries: 3 attempts
-- Initial delay: 1 second
-- Backoff multiplier: 2x exponential
-- Handles transient failures (5xx, timeouts, connection errors)
+### Add a Payment Gateway
 
-## 🛡️ Security & Legal
+1. Add signature to `config.py` (lines 72-663)
+   ```python
+   GATEWAYS_GLOBAL = [
+       # ... existing gateways
+       'newgateway.com/sdk.js',
+   ]
+   ```
 
-This tool is for authorized security research and educational purposes only. Always obtain permission before scanning target websites.
+2. (Optional) Add SDK patterns to `detection.py`
+   ```python
+   SDK_PATTERNS = {
+       'newgateway': [r'newgateway\.init\('],
+   }
+   ```
 
-## 📚 Development
+3. Test: `/url <website-with-gateway>`
 
-See `AGENTS.md` for detailed development guidelines including:
-- Code style and naming conventions
-- Type hints and docstring standards
-- Async patterns and error handling
-- Logging and configuration practices
-- Common pitfalls to avoid
+### Modify HTTP Behavior
 
-## 🔗 Additional Documentation
+Edit `gateway_checker.py`:
+- Retry logic
+- Timeouts
+- User agent rotation
+- Connection pooling
 
-- `TECHNICAL_DOCS.md` - Deep dive into architecture and detection logic
-- `AGENTS.md` - Development guidelines and code standards
-- `IMPLEMENTATION_GUIDE.md` - Feature implementation details
-- `QUICK_START.md` - Quick reference guide
-- `UI_RESEARCH_INDEX.md` - User interface research and examples
-- `GATEWAY_CHECKER_UI_EXAMPLES.md` - UI examples for the bot
+### Customize Rate Limiting
+
+Edit `rate_limiter.py` or `.env`:
+- Sliding window algorithm
+- Persistence settings
+- Default limits
+
+### View Audit Log
+
+Query SQLite database:
+```python
+import sqlite3
+conn = sqlite3.connect('gateway_checker.db')
+cursor = conn.cursor()
+cursor.execute('SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT 10')
+print(cursor.fetchall())
+```
+
+## ⚠️ Anti-Patterns to Avoid
+
+1. **NO Markdown for dynamic content** - Use plain text + Unicode (markdown breaks on special chars)
+2. **NO `asyncio.run()` in handlers** - Use `run_async()` from `async_manager.py`
+3. **NO bare `except:`** - Use specific exception types
+4. **NO word-boundary violations** - Use `\bgateway\b` not `gateway`
+5. **NO session leaks** - Close aiohttp sessions or use singleton
+6. **NO file corruption** - Use atomic writes (temp file + `os.replace()`)
+
+## 📋 Project Structure
+
+```
+Gateway Checker/
+├── bot_aiogram.py              # Main entry (2873 lines)
+├── detection.py                # Detection engine (1197 lines)
+├── gateway_checker.py          # HTTP orchestrator
+├── html_parser.py              # HTML analysis
+├── config.py                   # Signatures + config
+├── database.py                 # SQLite async layer
+├── user_manager.py             # User registration
+├── http_client.py              # Connection pooling
+├── cache_manager.py            # Result caching
+├── rate_limiter.py             # Request throttling
+├── pattern_matcher.py          # Multi-pattern matching
+├── security.py                 # Input validation
+├── audit_log.py                # Action tracking
+├── async_manager.py            # Sync-to-async bridge
+├── logger.py                   # Centralized logging
+├── progress_tracker.py         # Bulk scan progress
+├── utils.py                    # URL normalization
+├── user_agents.py              # UA rotation
+├── requirements.txt            # Dependencies
+├── .env.example                # Config template
+├── README.md                   # This file
+├── AGENTS.md                   # Development guide
+├── QUICK_START.md              # Fast setup
+├── IMPROVEMENTS.md             # Optimization notes
+├── gate_implement.md           # Implementation guide
+└── test_bugs_comprehensive.py  # Test suite
+```
+
+## 📦 Dependencies
+
+**Core:**
+- `aiogram>=3.24.0` - Telegram bot framework
+- `aiohttp==3.9.1` - Async HTTP client
+- `beautifulsoup4>=4.12.0` - HTML parsing
+- `lxml>=5.0.0` - Fast XML/HTML processor
+- `aiosqlite>=0.19.0` - Async SQLite
+
+**Performance (optional):**
+- `pyahocorasick>=2.0.0` - 10-20x faster pattern matching
+
+**Other:**
+- `python-dotenv==1.0.0` - Environment config
+- `validators==0.22.0` - URL validation
+- `curl_cffi>=0.6.0` - TLS fingerprint bypass
+- `fake-useragent>=2.2.0` - User agent rotation
+
+See `requirements.txt` for pinned versions.
+
+## 🤝 Contributing
+
+Contributions are welcome! Please:
+
+1. Follow code standards in `AGENTS.md`
+2. Add tests for new features
+3. Test with `/url <test-site>`
+4. Submit issues with reproduction steps
+
+## 📝 License
+
+This project is provided as-is for authorized security research and educational purposes only. Always obtain permission before scanning target websites.
+
+## 🙋 Support
+
+For issues, questions, or feature requests:
+1. Check existing documentation (`AGENTS.md`, `QUICK_START.md`)
+2. Review recent improvements in `IMPROVEMENTS.md`
+3. Check test files for usage examples
+4. Open an issue with:
+   - What you tried
+   - What you expected
+   - What happened instead
+   - Python version + OS
+
+---
+
+**Built with async-first architecture for reliability and scale.** Happy gateway hunting! 🚀

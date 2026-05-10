@@ -480,6 +480,134 @@ WORD_BOUNDARY_GATEWAYS: List[Tuple[str, str, float]] = [
 
 
 # =============================================================================
+# OPT-07: GATEWAY FREQUENCY RANK
+# =============================================================================
+# Lower rank = more common in the wild = checked first.
+# Based on real-world e-commerce prevalence data.
+# Gateways not listed here get rank 999 (checked last).
+
+GATEWAY_FREQUENCY_RANK: Dict[str, int] = {
+    # Tier A — global mega-platforms (millions of sites)
+    "Stripe": 1,
+    "WooCommerce": 2,
+    "PayPal": 3,
+    "Shopify Payments": 4,
+    "Braintree": 5,
+    "Square": 6,
+    "Authorize.Net": 7,
+    "2Checkout": 8,
+    "Worldpay": 9,
+    "CyberSource": 10,
+
+    # Tier B — BNPL & wallets (very common on retail)
+    "Klarna": 11,
+    "Afterpay": 12,
+    "Affirm": 13,
+    "Google Pay": 14,
+    "Apple Pay": 15,
+    "Amazon Pay": 16,
+    "Venmo": 17,
+    "Sezzle": 18,
+    "Zip": 19,
+    "Clearpay": 20,
+
+    # Tier C — global enterprise & regional leaders
+    "Adyen": 21,
+    "Checkout.com": 22,
+    "Mollie": 23,
+    "Paddle": 24,
+    "Chargebee": 25,
+    "Recurly": 26,
+    "Gumroad": 27,
+    "FastSpring": 28,
+    "Plaid": 29,
+    "GoCardless": 30,
+
+    # Tier D — strong regional (India)
+    "Razorpay": 31,
+    "Paytm": 32,
+    "PhonePe": 33,
+    "UPI": 34,
+    "Cashfree": 35,
+    "CCAvenue": 36,
+    "Juspay": 37,
+    "Billdesk": 38,
+    "Bharat QR": 39,
+    "YONO SBI Pay": 40,
+    "ICICI iMobile Pay": 41,
+
+    # Tier E — Africa
+    "Paystack": 42,
+    "Flutterwave": 43,
+    "M-Pesa": 44,
+    "Remitly": 45,
+    "WorldRemit": 46,
+    "Paga": 47,
+    "Moov Africa": 48,
+
+    # Tier F — Latin America
+    "Mercado Pago": 49,
+    "PagSeguro": 50,
+    "EBANX": 51,
+    "PIX": 52,
+    "Boleto": 53,
+    "Stone": 54,
+    "Uala": 55,
+
+    # Tier G — Asia / China
+    "Alipay": 56,
+    "WeChat Pay": 57,
+    "UnionPay": 58,
+    "Tencent Pay": 59,
+    "SeaMoney": 60,
+    "TrueMoney": 61,
+    "LinkAja": 62,
+    "AirAsia Pay": 63,
+    "Boost Malaysia": 64,
+
+    # Tier H — Europe regional
+    "iDEAL": 65,
+    "Sofort": 66,
+    "Giropay": 67,
+    "Bancontact": 68,
+    "Przelewy24": 69,
+    "Trustly": 70,
+    "Fondy": 71,
+    "Datatrans": 72,
+
+    # Tier I — Middle East
+    "Ziina": 73,
+    "MyFatoorah": 74,
+    "Hala Pay": 75,
+
+    # Tier J — Crypto
+    "BitPay": 76,
+    "Coinbase Commerce": 77,
+    "NOWPayments": 78,
+    "CoinGate": 79,
+    "Haveno": 80,
+    "Zcash Payments": 81,
+
+    # Tier K — fintech / embedded
+    "Airwallex": 82,
+    "dLocal": 83,
+    "Marqeta": 84,
+    "Sift Science": 85,
+    "Bolt": 86,
+    "TrueLayer": 87,
+
+    # Tier L — gaming / niche SaaS / wellness
+    "Xsolla": 88,
+    "Unity Monetization": 89,
+    "Sage Intacct": 90,
+    "SAP Concur": 91,
+    "Oracle Payments": 92,
+    "Mindbody": 93,
+    "ClassPass": 94,
+}
+
+
+# =============================================================================
 # DETECTION FUNCTIONS
 # =============================================================================
 
@@ -490,33 +618,51 @@ _compiled_word_patterns: List[Tuple[re.Pattern, str, float]] = []
 
 
 def _compile_patterns():
-    """Pre-compile all regex patterns for better performance."""
+    """Pre-compile all regex patterns for better performance.
+
+    OPT-07: After compilation, patterns are sorted by GATEWAY_FREQUENCY_RANK
+    so the most commonly encountered gateways are iterated first.  This reduces
+    average scan time because the inner-loop ``if gateway in matches: continue``
+    guard fires earlier for the gateways that appear on the most sites.
+    Unlisted gateways fall back to rank 999 and are checked last.
+    """
     global _compiled_sdk_patterns, _compiled_form_patterns, _compiled_word_patterns
 
     if _compiled_sdk_patterns:
         return  # Already compiled
 
-    # Compile SDK patterns
+    # Compile SDK patterns, then sort by frequency rank (OPT-07)
+    raw_sdk: Dict[str, List[Tuple[re.Pattern, float]]] = {}
     for gateway, patterns in SDK_PATTERNS.items():
-        _compiled_sdk_patterns[gateway] = [
+        raw_sdk[gateway] = [
             (re.compile(pattern, re.IGNORECASE), conf)
             for pattern, conf in patterns
         ]
+    _compiled_sdk_patterns = dict(
+        sorted(raw_sdk.items(), key=lambda kv: GATEWAY_FREQUENCY_RANK.get(kv[0], 999))
+    )
 
-    # Compile form patterns
+    # Compile form patterns (small set — no need to sort)
     for gateway, patterns in FORM_PATTERNS.items():
         _compiled_form_patterns[gateway] = [
             (re.compile(pattern, re.IGNORECASE), conf)
             for pattern, conf in patterns
         ]
 
-    # Compile word boundary patterns
-    _compiled_word_patterns = [
+    # Compile word boundary patterns, then sort by frequency rank (OPT-07)
+    raw_word = [
         (re.compile(pattern, re.IGNORECASE), name, conf)
         for pattern, name, conf in WORD_BOUNDARY_GATEWAYS
     ]
+    _compiled_word_patterns = sorted(
+        raw_word, key=lambda t: GATEWAY_FREQUENCY_RANK.get(t[1], 999)
+    )
 
-    logger.debug("Detection patterns compiled")
+    logger.debug(
+        f"Detection patterns compiled and frequency-ordered "
+        f"(OPT-07: {len(_compiled_sdk_patterns)} SDK, "
+        f"{len(_compiled_word_patterns)} word-boundary patterns)"
+    )
 
 
 def find_payment_gateways_optimized(html: str) -> Tuple[List[str], Dict[str, GatewayMatch]]:

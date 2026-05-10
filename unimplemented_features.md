@@ -38,9 +38,9 @@
 | OPT-02 | Enable cache lookup on retry (currently only checked on `retry_count==0`) | `gateway_checker.py` | 2 min | ✅ **Done** — cache checked on ALL retry attempts (L126) |
 | OPT-03 | Parallel HTML analysis with `ThreadPoolExecutor` + `asyncio.gather()` | `detection.py` | 30 min | ❌ |
 | OPT-04 | Circuit breaker for failing domains (avoids 3×timeout per dead site) | `gateway_checker.py` | 45 min | ❌ |
-| OPT-05 | Increase `limit_per_host` from 10 → 30 for bulk same-domain scans | `http_client.py` | 5 min | ❌ — still 10 |
+| OPT-05 | Increase `limit_per_host` from 10 → 30 for bulk same-domain scans | `http_client.py` | 5 min | ✅ **Done** — `limit_per_host=30` in `TCPConnector` |
 | OPT-06 | Response streaming with size limit (currently `await response.text()` loads all) | `gateway_checker.py` | 60 min | ❌ |
-| OPT-07 | Frequency-ordered patterns (most common gateways checked first) | `detection.py` | 30 min | ❌ |
+| OPT-07 | Frequency-ordered patterns (most common gateways checked first) | `detection.py` | 30 min | ✅ **Done** — `GATEWAY_FREQUENCY_RANK` dict + sort in `_compile_patterns` |
 | OPT-08 | Failed-result caching (TTL-based per status code: 403→30m, 5xx→5m, timeout→10m) | `cache_manager.py` | 45 min | ❌ |
 | OPT-09 | Adaptive timeout based on domain history | `gateway_checker.py` | 60 min | ❌ |
 
@@ -90,7 +90,7 @@ All Tier 1–3 gateway additions are **not yet added** to `config.py`/`detection
 ```
 🔴 Fix First (small effort, high impact):
   1. ✅ OPT-01 — O(n²) list fix in process_urls_async
-  2. OPT-05 — Increase limit_per_host 10 → 30 (5 min)  ← STILL OPEN
+  2. ✅ OPT-05 — Increase limit_per_host 10 → 30 (5 min)
   3. ✅ INFRA-01 — Wire cache_manager into gateway_checker.py
   4. ✅ WARNING-003 — Replace _lock_flag bool with threading.Lock
   5. ✅ WARNING-001 — Fix Dict[str, any] → Dict[str, Any]
@@ -144,9 +144,9 @@ All Tier 1–3 gateway additions are **not yet added** to `config.py`/`detection
 |----|------|--------|
 | OPT-03 | Parallel HTML analysis (`ThreadPoolExecutor`) | 30 min |
 | OPT-04 | Circuit breaker for dead domains | 45 min |
-| OPT-05 | `limit_per_host` 10 → 30 | 5 min |
+| OPT-05 | `limit_per_host` 10 → 30 | 5 min | ✅ **Done** |
 | OPT-06 | Response streaming with size cap | 60 min |
-| OPT-07 | Frequency-ordered gateway patterns | 30 min |
+| OPT-07 | Frequency-ordered gateway patterns | 30 min | ✅ **Done** |
 | OPT-08 | Failed-result caching (per-status TTL) | 45 min |
 | OPT-09 | Adaptive per-domain timeout | 60 min |
 

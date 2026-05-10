@@ -5,7 +5,7 @@ This module provides a singleton HTTP client that maintains persistent connectio
 across requests, significantly reducing connection overhead for repeated domain access.
 
 Key optimizations:
-1. Connection pooling - Reuses TCP connections (limit=100 total, 10 per host)
+1. Connection pooling - Reuses TCP connections (limit=100 total, 30 per host)
 2. DNS caching - 5-minute TTL reduces DNS lookup overhead
 3. Keep-alive - Maintains connections for 30 seconds
 4. Session lifecycle - Single session for the entire bot lifecycle
@@ -89,7 +89,7 @@ class PersistentHTTPClient:
 
         Connector settings:
         - limit=100: Maximum 100 simultaneous connections total
-        - limit_per_host=10: Maximum 10 connections per domain
+        - limit_per_host=30: Maximum 30 connections per domain (OPT-05)
         - ttl_dns_cache=300: Cache DNS lookups for 5 minutes
         - keepalive_timeout=30: Keep connections alive for 30 seconds
         - enable_cleanup_closed=True: Clean up closed connections
@@ -112,7 +112,7 @@ class PersistentHTTPClient:
         # Create optimized connector with connection pooling
         self._connector = aiohttp.TCPConnector(
             limit=100,  # Total connections across all hosts
-            limit_per_host=10,  # Connections per host
+            limit_per_host=30,  # Connections per host (OPT-05: raised 10→30 for bulk same-domain scans)
             ttl_dns_cache=300,  # DNS cache TTL (5 minutes)
             keepalive_timeout=30,  # Keep connections alive (seconds)
             enable_cleanup_closed=True,  # Clean up closed connections
@@ -138,7 +138,7 @@ class PersistentHTTPClient:
         self._initialized = True
         logger.info(
             "Persistent HTTP client initialized with connection pooling "
-            f"(limit=100, per_host=10, dns_cache=300s)"
+            f"(limit=100, per_host=30, dns_cache=300s)"
         )
 
     @property
