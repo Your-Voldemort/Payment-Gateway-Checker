@@ -950,32 +950,48 @@ async def cmd_addsub(message: Message):
                 target_user_id=target_user_id,
                 details=f"Added {duration} subscription, new expiry: {new_expiry}"
             )
-            
-            await message.answer(
-                f"✅ Success!\n\n"
-                f"User: {target_user_id}\n"
-                f"Added: {duration}\n"
-                f"New Expiry: {new_expiry}"
-            )
 
-            # Optionally notify the user
+            # Try to notify the target user FIRST, then report combined status to admin
+            notification_sent = False
+            notification_error = None
             try:
-                # We need the bot instance to send message to other user
-                # In aiogram 3 handlers, message.bot gives access to bot instance
                 await message.bot.send_message(
                     target_user_id,
                     "╭───────────────────────────╮\n"
                     "│   🎉  PLAN ACTIVATED      │\n"
                     "╰───────────────────────────╯\n"
                     "\n"
-                    f"Your subscription has been extended!\n"
+                    f"Your subscription has been activated!\n"
+                    f"Duration: {duration}\n"
                     f"Expires: {new_expiry}\n"
                     "\n"
                     "Thank you for your support! 💎"
                     + get_footer()
                 )
+                notification_sent = True
+                logger.info(f"Subscription notification sent to user {target_user_id}")
             except Exception as e:
-                await message.answer(f"Warning: Could not notify user (user might have blocked bot): {e}")
+                notification_error = str(e)
+                logger.warning(f"Failed to send subscription notification to user {target_user_id}: {e}")
+
+            # Build combined admin response with notification status
+            admin_msg = (
+                f"✅ Subscription Added!\n\n"
+                f"User: {target_user_id}\n"
+                f"Duration: {duration}\n"
+                f"New Expiry: {new_expiry}\n"
+            )
+
+            if notification_sent:
+                admin_msg += "\n📬 User has been notified!"
+            else:
+                admin_msg += (
+                    f"\n⚠️ Could NOT notify user!\n"
+                    f"Reason: {notification_error}\n"
+                    f"Tip: User must send /start to the bot first before they can receive messages."
+                )
+
+            await message.answer(admin_msg)
 
         else:
             await message.answer("❌ Failed to add subscription. Check logs.")

@@ -321,7 +321,10 @@ async def add_subscription_db(user_id: int, duration_str: str) -> Optional[str]:
             
             if not row:
                 # Auto-register user
-                await register_user_db(user_id)
+                reg_result = await register_user_db(user_id)
+                if reg_result == 'error':
+                    logger.error(f"Auto-registration failed for user {user_id}, cannot add subscription")
+                    return None
                 current_expiry = datetime.now()
             else:
                 expiry_str = row[0]
@@ -339,6 +342,8 @@ async def add_subscription_db(user_id: int, duration_str: str) -> Optional[str]:
             duration_str = duration_str.lower()
             if duration_str.endswith('d'):
                 delta = timedelta(days=int(duration_str[:-1]))
+            elif duration_str.endswith('w'):
+                delta = timedelta(weeks=int(duration_str[:-1]))
             elif duration_str.endswith('m'):
                 delta = timedelta(days=int(duration_str[:-1]) * 30)
             elif duration_str.endswith('y'):
