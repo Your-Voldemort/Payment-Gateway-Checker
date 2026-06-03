@@ -20,6 +20,16 @@ class Config:
     REQUEST_TIMEOUT = int(os.getenv('REQUEST_TIMEOUT', 10))
     MAX_URLS_PER_REQUEST = int(os.getenv('MAX_URLS_PER_REQUEST', 10))
 
+    # Bulk Scanning (/bulk on a replied .txt file).
+    # URLs are scanned in batches of BULK_BATCH_SIZE; results are appended to a
+    # per-user output file the user can download as CSV / TXT / JSON.
+    BULK_BATCH_SIZE = int(os.getenv('BULK_BATCH_SIZE', 10))
+    # Hard ceiling on URLs processed from a single file (protects the bot from
+    # multi-hour jobs). Set generously so typical large lists run in full.
+    MAX_BULK_URLS = int(os.getenv('MAX_BULK_URLS', 5000))
+    # Directory where per-user bulk result files are accumulated.
+    BULK_RESULTS_DIR = os.getenv('BULK_RESULTS_DIR', 'bulk_results')
+
     # Deep Scan (Power-ups P1/P2): probe checkout/cart pages & first-party JS bundles.
     # Set DEEP_SCAN_ENABLED=false to keep the fast homepage-only path.
     DEEP_SCAN_ENABLED = os.getenv('DEEP_SCAN_ENABLED', 'true').lower() == 'true'
