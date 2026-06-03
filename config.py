@@ -19,6 +19,22 @@ class Config:
     # Request Settings
     REQUEST_TIMEOUT = int(os.getenv('REQUEST_TIMEOUT', 10))
     MAX_URLS_PER_REQUEST = int(os.getenv('MAX_URLS_PER_REQUEST', 10))
+
+    # Deep Scan (Power-ups P1/P2): probe checkout/cart pages & first-party JS bundles.
+    # Set DEEP_SCAN_ENABLED=false to keep the fast homepage-only path.
+    DEEP_SCAN_ENABLED = os.getenv('DEEP_SCAN_ENABLED', 'true').lower() == 'true'
+
+    # Anti-bot / proxy settings (all optional).
+    # PROXY_URL: single proxy, e.g. http://user:pass@host:port (http/https/socks5).
+    # PROXY_LIST: comma-separated proxies; one is chosen per request (rotation).
+    PROXY_URL = os.getenv('PROXY_URL', '').strip()
+    PROXY_LIST = [p.strip() for p in os.getenv('PROXY_LIST', '').split(',') if p.strip()]
+    # Promote curl_cffi (browser TLS/JA3/HTTP2 impersonation) to the primary fetch for a
+    # domain after it returns a block/challenge, instead of only as a 400 fallback.
+    CURL_CFFI_ON_BLOCK = os.getenv('CURL_CFFI_ON_BLOCK', 'true').lower() == 'true'
+    # Browser profile(s) curl_cffi impersonates; comma-separated -> randomly chosen.
+    # 'chrome' auto-tracks the latest; pin/rotate e.g. 'chrome131,chrome124,safari_ios'.
+    CURL_IMPERSONATE = os.getenv('CURL_IMPERSONATE', 'chrome')
     
     # Rate Limiting
     ENABLE_RATE_LIMITING = os.getenv('ENABLE_RATE_LIMITING', 'true').lower() == 'true'

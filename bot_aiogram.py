@@ -2651,9 +2651,9 @@ async def process_urls_async(
         progress.start()
 
         completed = 0
-        # Create URL-to-index mapping for O(1) lookups (fixes O(n²) bottleneck)
-        url_to_idx = {url: i for i, url in enumerate(urls)}
-        pending_tasks = {asyncio.create_task(task): url for task, url in zip(tasks, urls)}
+        # Map each task to its position so duplicate URLs don't collide (Bug 3)
+        created = [asyncio.create_task(task) for task in tasks]
+        pending_tasks = {t: i for i, t in enumerate(created)}  # task -> idx
         responses = [None] * total  # Preserve order
 
         while pending_tasks:
@@ -2664,9 +2664,12 @@ async def process_urls_async(
             )
 
             for task in done:
-                url = pending_tasks[task]
-                idx = url_to_idx[url]  # O(1) dict lookup instead of O(n) list search
-                responses[idx] = await task
+                idx = pending_tasks[task]
+                url = urls[idx]
+                try:
+                    responses[idx] = await task
+                except Exception as e:  # mirror gather(return_exceptions=True) (Bug 4)
+                    responses[idx] = e
                 del pending_tasks[task]
                 completed += 1
                 

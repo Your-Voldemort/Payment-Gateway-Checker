@@ -13,6 +13,11 @@ from typing import Dict, List, Tuple, NamedTuple, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
 from logger import setup_logger
+from pattern_matcher import GatewayPrefilter
+try:
+    from re import _parser as _sre_parse  # Python 3.11+
+except ImportError:  # pragma: no cover - older interpreters
+    import sre_parse as _sre_parse
 
 logger = setup_logger()
 
@@ -615,6 +620,51 @@ GATEWAY_FREQUENCY_RANK: Dict[str, int] = {
 _compiled_sdk_patterns: Dict[str, List[Tuple[re.Pattern, float]]] = {}
 _compiled_form_patterns: Dict[str, List[Tuple[re.Pattern, float]]] = {}
 _compiled_word_patterns: List[Tuple[re.Pattern, str, float]] = []
+_prefilter: Optional[GatewayPrefilter] = None
+
+
+def _required_literal(pattern: str, min_len: int = 3) -> Optional[str]:
+    """Longest literal substring guaranteed to occur (case-insensitively) in any
+    string this regex matches, or None if no run >= min_len is guaranteed.
+
+    This makes the Aho-Corasick pre-filter sound: if a pattern can match a page,
+    its anchor is present, so the automaton flags the gateway. Conservative —
+    anything variable (alternation, optional, char class, repeat) ends the run.
+    """
+    try:
+        parsed = _sre_parse.parse(pattern)
+    except Exception:
+        return None
+
+    best = ""
+    cur: List[str] = []
+
+    def flush():
+        nonlocal best, cur
+        run = "".join(cur)
+        if len(run) > len(best):
+            best = run
+        cur = []
+
+    def walk(seq):
+        for op, av in seq:
+            nm = op.name
+            if nm == "LITERAL":
+                cur.append(chr(av).lower())
+            elif nm in ("MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"):
+                mn, _mx, sub = av
+                if mn >= 1:
+                    walk(sub)   # sub is guaranteed to appear at least once
+                flush()         # repeat count varies -> end the contiguous run
+            elif nm == "SUBPATTERN":
+                walk(av[-1])
+            else:
+                # BRANCH / IN / ANY / NOT_LITERAL / CATEGORY / AT / ASSERT* / GROUPREF
+                flush()
+
+    walk(parsed)
+    flush()
+    return best if len(best) >= min_len else None
 
 
 def _compile_patterns():
@@ -626,7 +676,7 @@ def _compile_patterns():
     guard fires earlier for the gateways that appear on the most sites.
     Unlisted gateways fall back to rank 999 and are checked last.
     """
-    global _compiled_sdk_patterns, _compiled_form_patterns, _compiled_word_patterns
+    global _compiled_sdk_patterns, _compiled_form_patterns, _compiled_word_patterns, _prefilter
 
     if _compiled_sdk_patterns:
         return  # Already compiled
@@ -658,6 +708,29 @@ def _compile_patterns():
         raw_word, key=lambda t: GATEWAY_FREQUENCY_RANK.get(t[1], 999)
     )
 
+    # Build the Aho-Corasick pre-filter from literal anchors of the LIVE catalog
+    # (single source of truth — no separate pattern list to drift out of sync).
+    _anchors: Dict[str, List[str]] = {}
+    _always_run = set()
+
+    def _add_anchor(gateway: str, pat: str):
+        anchor = _required_literal(pat)
+        if anchor:
+            _anchors.setdefault(gateway, []).append(anchor)
+        else:
+            _always_run.add(gateway)  # no safe anchor -> never filter this gateway
+
+    for gateway, patterns in SDK_PATTERNS.items():
+        for pat, _conf in patterns:
+            _add_anchor(gateway, pat)
+    for gateway, patterns in FORM_PATTERNS.items():
+        for pat, _conf in patterns:
+            _add_anchor(gateway, pat)
+    for pat, name, _conf in WORD_BOUNDARY_GATEWAYS:
+        _add_anchor(name, pat)
+
+    _prefilter = GatewayPrefilter(_anchors, _always_run)
+
     logger.debug(
         f"Detection patterns compiled and frequency-ordered "
         f"(OPT-07: {len(_compiled_sdk_patterns)} SDK, "
@@ -686,8 +759,14 @@ def find_payment_gateways_optimized(html: str) -> Tuple[List[str], Dict[str, Gat
 
     matches: Dict[str, GatewayMatch] = {}
 
+    # Aho-Corasick pre-filter: only gateways whose literal anchors are present
+    # (or that are anchorless) can match, so skip the rest before their regex tiers.
+    candidates = _prefilter.candidates(html) if _prefilter is not None else None
+
     # Tier 1: High confidence SDK patterns
     for gateway, patterns in _compiled_sdk_patterns.items():
+        if candidates is not None and gateway not in candidates:
+            continue
         for pattern, confidence in patterns:
             match = pattern.search(html)
             if match:
@@ -702,6 +781,8 @@ def find_payment_gateways_optimized(html: str) -> Tuple[List[str], Dict[str, Gat
 
     # Tier 2: Medium confidence form patterns
     for gateway, patterns in _compiled_form_patterns.items():
+        if candidates is not None and gateway not in candidates:
+            continue
         for pattern, confidence in patterns:
             if gateway in matches:
                 continue  # Already found with higher confidence
@@ -716,6 +797,8 @@ def find_payment_gateways_optimized(html: str) -> Tuple[List[str], Dict[str, Gat
 
     # Tier 3: Low confidence word boundary patterns
     for pattern, name, confidence in _compiled_word_patterns:
+        if candidates is not None and name not in candidates:
+            continue
         if name in matches:
             continue  # Already found with higher confidence
         match = pattern.search(html)
