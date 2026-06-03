@@ -2,6 +2,7 @@
 
 import aiohttp
 import asyncio
+import random
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -18,6 +19,7 @@ from detection import (
 from user_agents import get_random_user_agent
 from cache_manager import get_cached_result, save_to_cache
 from http_client import get_http_session
+from deep_scan import deep_scan_gateways
 from logger import setup_logger
 
 logger = setup_logger()
@@ -46,6 +48,48 @@ RETRY_BACKOFF = 2  # exponential backoff multiplier
 # 512 KB is more than enough to capture them while preventing OOM on multi-MB
 # pages (news articles, documentation, etc.).
 MAX_RESPONSE_BYTES = 512_000  # 500 KB
+
+def _client_hints_for_ua(user_agent: str) -> Dict[str, str]:
+    """Build Sec-CH-UA client-hint headers consistent with the chosen User-Agent.
+
+    Only Chromium-based browsers emit these headers. For Firefox/Safari we return
+    an empty dict so the fingerprint stays internally consistent — a random Firefox
+    UA paired with hardcoded Chrome hints is exactly the mismatch modern WAFs
+    (Cloudflare, Akamai, Datadome) flag, which can *reduce* the bypass rate.
+    """
+    ua = user_agent or ""
+    # Firefox and Safari do not send Sec-CH-UA headers; only Chromium does.
+    if "Chrome/" not in ua or "Firefox" in ua:
+        return {}
+
+    # Major Chromium version, e.g. "Chrome/131.0.0.0" -> "131"
+    start = ua.find("Chrome/") + len("Chrome/")
+    i = start
+    while i < len(ua) and ua[i].isdigit():
+        i += 1
+    version = ua[start:i] or "120"
+
+    # Platform token derived from the UA string.
+    if "Windows" in ua:
+        platform = "Windows"
+    elif "Android" in ua:
+        platform = "Android"
+    elif "CrOS" in ua:
+        platform = "Chrome OS"
+    elif "Mac OS X" in ua or "Macintosh" in ua:
+        platform = "macOS"
+    elif "Linux" in ua:
+        platform = "Linux"
+    else:
+        platform = "Windows"
+
+    mobile = "?1" if ("Mobile" in ua or "Android" in ua) else "?0"
+
+    return {
+        "Sec-Ch-Ua": f'"Not_A Brand";v="8", "Chromium";v="{version}", "Google Chrome";v="{version}"',
+        "Sec-Ch-Ua-Mobile": mobile,
+        "Sec-Ch-Ua-Platform": f'"{platform}"',
+    }
 
 
 # =============================================================================
@@ -277,15 +321,18 @@ async def _stream_response_text(
     return raw.decode(encoding, errors="replace")
 
 
-def _fetch_with_curl_cffi(url: str, timeout: int = 15) -> Tuple[str, int, dict]:
+def _fetch_with_curl_cffi(
+    url: str, timeout: int = 15, proxy: Optional[str] = None
+) -> Tuple[str, int, dict]:
     """
-    Fetch URL using curl_cffi with Chrome browser impersonation.
+    Fetch URL using curl_cffi with browser impersonation (TLS/JA3/HTTP2 + header order).
 
-    This bypasses TLS/JA3 fingerprinting used by CDNs like Fastly, Cloudflare, Akamai.
+    Bypasses TLS/JA3 fingerprinting used by CDNs like Fastly, Cloudflare, Akamai.
 
     Args:
         url: URL to fetch
         timeout: Request timeout in seconds
+        proxy: Optional proxy URL (http/https/socks5, may embed user:pass)
 
     Returns:
         Tuple of (html_content, status_code, headers_dict)
@@ -296,24 +343,219 @@ def _fetch_with_curl_cffi(url: str, timeout: int = 15) -> Tuple[str, int, dict]:
     if not CURL_CFFI_AVAILABLE:
         raise RuntimeError("curl_cffi not available")
 
-    response = curl_requests.get(
-        url,
-        impersonate="chrome",  # Impersonate Chrome browser TLS fingerprint
-        timeout=timeout,
-        allow_redirects=True,
-    )
+    kwargs = {
+        "impersonate": _pick_impersonate(),  # browser TLS profile (rotatable)
+        "timeout": timeout,
+        "allow_redirects": True,
+    }
+    if proxy:
+        kwargs["proxy"] = proxy
+
+    response = curl_requests.get(url, **kwargs)
     return response.text, response.status_code, dict(response.headers)
 
 
 async def _async_fetch_with_curl_cffi(
-    url: str, timeout: int = 15
+    url: str, timeout: int = 15, proxy: Optional[str] = None
 ) -> Tuple[str, int, dict]:
     """
     Async wrapper for curl_cffi fetch (runs in thread pool).
     """
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
-        _curl_executor, _fetch_with_curl_cffi, url, timeout
+        _curl_executor, _fetch_with_curl_cffi, url, timeout, proxy
+    )
+
+
+# Markers that indicate an anti-bot interstitial rather than the real page.
+_CHALLENGE_MARKERS = (
+    "just a moment",
+    "checking your browser",
+    "cf-browser-verification",
+    "__cf_chl",
+    "cf_chl_opt",
+    "challenge-platform",
+    "enable javascript and cookies to continue",
+    "ddos-guard",
+    "px-captcha",
+    "_imperva_",
+    "incapsula incident",
+    "datadome",
+)
+
+# Domains that tripped anti-bot defenses on the plain client; fetch via curl_cffi first.
+_force_curl_domains: set = set()
+
+
+def _pick_proxy() -> Optional[str]:
+    """Choose a proxy URL: rotate over PROXY_LIST, else PROXY_URL, else None."""
+    if Config.PROXY_LIST:
+        return random.choice(Config.PROXY_LIST)
+    return Config.PROXY_URL or None
+
+
+def _aiohttp_proxy_kwargs(proxy: Optional[str]) -> dict:
+    """Translate a proxy URL into aiohttp get() kwargs, splitting out basic auth."""
+    if not proxy:
+        return {}
+    parsed = urlparse(proxy)
+    if parsed.username or parsed.password:
+        host = parsed.hostname or ""
+        netloc = f"{host}:{parsed.port}" if parsed.port else host
+        clean = parsed._replace(netloc=netloc).geturl()
+        return {
+            "proxy": clean,
+            "proxy_auth": aiohttp.BasicAuth(parsed.username or "", parsed.password or ""),
+        }
+    return {"proxy": proxy}
+
+
+def _pick_impersonate() -> str:
+    """Pick a curl_cffi impersonation target (rotates if CURL_IMPERSONATE is a list)."""
+    choices = [c.strip() for c in str(Config.CURL_IMPERSONATE).split(",") if c.strip()]
+    return random.choice(choices) if choices else "chrome"
+
+
+def _domain_of(url: str) -> str:
+    try:
+        return urlparse(url).netloc.lower()
+    except Exception:
+        return ""
+
+
+def _should_curl_first(url: str) -> bool:
+    """True if this domain previously tripped anti-bot defenses (use curl_cffi first)."""
+    return (
+        CURL_CFFI_AVAILABLE
+        and Config.CURL_CFFI_ON_BLOCK
+        and _domain_of(url) in _force_curl_domains
+    )
+
+
+def _mark_curl_domain(url: str) -> None:
+    domain = _domain_of(url)
+    if domain:
+        _force_curl_domains.add(domain)
+
+
+def _looks_like_block(status: int, html: str, headers: dict) -> bool:
+    """Heuristic: does this response look like an anti-bot block/challenge rather than
+    the real page? Catches 403/429 and 200-with-JS-challenge interstitials."""
+    if status in (403, 429):
+        return True
+    hdr = {str(k).lower(): str(v).lower() for k, v in (headers or {}).items()}
+    if hdr.get("cf-mitigated") == "challenge":
+        return True
+    server = hdr.get("server", "")
+    if status == 503 and ("cloudflare" in server or "ddos-guard" in server):
+        return True
+    if not html:
+        return False
+    low = html[:20000].lower()
+    return any(marker in low for marker in _CHALLENGE_MARKERS)
+
+
+def _make_curl_fetcher(proxy: Optional[str]):
+    """Build an async fetcher(url) -> Optional[str] using curl_cffi (+ proxy), so the
+    deep scan's sub-fetches go through the hardened path on flagged domains."""
+    async def _fetch(target_url: str) -> Optional[str]:
+        try:
+            text, status, hdrs = await _async_fetch_with_curl_cffi(
+                target_url, timeout=Config.REQUEST_TIMEOUT, proxy=proxy
+            )
+        except Exception:
+            return None
+        if status != 200 or _looks_like_block(status, text, hdrs):
+            return None
+        raw = text.encode("utf-8", errors="replace")
+        if len(raw) > MAX_RESPONSE_BYTES:
+            text = raw[:MAX_RESPONSE_BYTES].decode("utf-8", errors="replace")
+        return text
+    return _fetch
+
+
+async def _curl_cffi_attempt(url: str, use_cache: bool):
+    """Fetch via curl_cffi (browser TLS impersonation, optional proxy), analyze, cache.
+
+    Returns the standard 9-tuple on a genuine 200, or None if curl_cffi is unavailable,
+    errored, returned non-200, or returned another challenge page. Also runs the deep
+    scan (P1/P2) through curl_cffi so hard domains keep checkout/JS coverage.
+    """
+    if not CURL_CFFI_AVAILABLE:
+        return None
+    proxy = _pick_proxy()
+    try:
+        text, curl_status, curl_headers = await _async_fetch_with_curl_cffi(
+            url, timeout=Config.REQUEST_TIMEOUT, proxy=proxy
+        )
+    except Exception as curl_err:
+        logger.error(f"curl_cffi failed for {url}: {curl_err}")
+        return None
+
+    raw = text.encode("utf-8", errors="replace")
+    if len(raw) > MAX_RESPONSE_BYTES:
+        text = raw[:MAX_RESPONSE_BYTES].decode("utf-8", errors="replace")
+
+    if curl_status != 200:
+        logger.warning(f"curl_cffi got status {curl_status} for {url}")
+        return None
+    if _looks_like_block(curl_status, text, curl_headers):
+        logger.warning(f"curl_cffi response still looks like a challenge for {url}")
+        return None
+
+    logger.info(
+        f"curl_cffi succeeded for {url} - bypassed TLS fingerprinting"
+        + (" (via proxy)" if proxy else "")
+    )
+
+    analysis = analyze_url_response(html=text, headers=curl_headers, status_code=curl_status)
+    platform_detection = detect_ecommerce_platform(html=text, headers=curl_headers)
+    platform_name = platform_detection["platform"] or "None detected"
+    cart_abandonment = detect_cart_abandonment_tools(html=text, headers=curl_headers)
+    cart_summary = cart_abandonment["summary"]
+
+    # Deep scan (P1/P2) over curl_cffi so flagged domains keep checkout/JS coverage.
+    if Config.DEEP_SCAN_ENABLED:
+        try:
+            merged = await deep_scan_gateways(
+                base_url=url,
+                homepage_html=text,
+                session=None,
+                headers={},
+                known_gateways=analysis["gateways"],
+                fetcher=_make_curl_fetcher(proxy),
+            )
+            new_found = [g for g in merged if g not in analysis["gateways"]]
+            if new_found:
+                analysis["gateways"] = list(analysis["gateways"]) + new_found
+                logger.info(f"Deep scan (curl) added {len(new_found)} gateway(s) for {url}")
+        except Exception as deep_err:
+            logger.debug(f"curl deep scan failed for {url}: {deep_err}")
+
+    await _circuit_breaker.record_success(url)
+    if use_cache:
+        await save_to_cache(url, {
+            "gateways": analysis["gateways"],
+            "status_code": curl_status,
+            "captcha": analysis["captcha"],
+            "cloudflare": analysis["cloudflare"],
+            "security_type": analysis["security_type"],
+            "cvv_status": analysis["cvv_status"],
+            "inbuilt_status": analysis["inbuilt_status"],
+            "ecommerce_platform": platform_name,
+            "cart_abandonment": cart_summary,
+        })
+
+    return (
+        analysis["gateways"],
+        curl_status,
+        analysis["captcha"],
+        analysis["cloudflare"],
+        analysis["security_type"],
+        analysis["cvv_status"],
+        analysis["inbuilt_status"],
+        platform_name,
+        cart_summary,
     )
 
 
@@ -424,10 +666,10 @@ async def check_url(
         # Additional headers for better compatibility
         "Cache-Control": "max-age=0",
         "DNT": "1",  # Do Not Track
-        "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"Windows"',
     }
+    # P4: client hints derived from the chosen UA (empty for non-Chromium) so the
+    # fingerprint is internally consistent and not flagged by WAFs.
+    headers.update(_client_hints_for_ua(user_agent))
 
     # Use the shared persistent connection pool if no session is passed.
     # Previously this created a fresh aiohttp.ClientSession() (and a new TCP
@@ -437,6 +679,14 @@ async def check_url(
     if session is None:
         session = await get_http_session()  # Shared pool — never close this
         close_session = False
+
+    # If this domain previously tripped anti-bot defenses, skip straight to the
+    # browser-impersonation client (optionally via proxy) before the plain client.
+    if retry_count == 0 and _should_curl_first(url):
+        logger.info(f"Domain flagged for curl_cffi-first fetch: {url}")
+        _curl_first = await _curl_cffi_attempt(url, use_cache)
+        if _curl_first is not None:
+            return _curl_first
 
     try:
         attempt_info = (
@@ -448,13 +698,28 @@ async def check_url(
         await asyncio.sleep(0.3)
 
         timeout = aiohttp.ClientTimeout(total=Config.REQUEST_TIMEOUT)
+        _proxy = _pick_proxy()
         async with session.get(
-            url, headers=headers, timeout=timeout, allow_redirects=True
+            url, headers=headers, timeout=timeout, allow_redirects=True,
+            **_aiohttp_proxy_kwargs(_proxy)
         ) as response:
             response.raise_for_status()
             # Stream up to MAX_RESPONSE_BYTES to avoid OOM on large pages.
             # Detection targets (<head>, early <body>) are always in the first 500 KB.
             text = await _stream_response_text(response)
+
+            # Anti-bot interstitial returned with a 2xx? Retry via browser impersonation.
+            if Config.CURL_CFFI_ON_BLOCK and _looks_like_block(
+                response.status, text, dict(response.headers)
+            ):
+                logger.warning(
+                    f"Challenge/block page detected for {url} (status {response.status}) "
+                    f"- retrying via curl_cffi"
+                )
+                _mark_curl_domain(url)
+                _bypass = await _curl_cffi_attempt(url, use_cache)
+                if _bypass is not None:
+                    return _bypass
 
             # Use the new optimized detection module
             # This provides word-boundary matching, SDK detection, and header analysis
@@ -494,6 +759,27 @@ async def check_url(
                 logger.info(
                     f"Detected cart abandonment tools for {url}: {cart_summary}"
                 )
+
+            # P1/P2: deep scan — probe checkout/cart pages and first-party JS
+            # bundles for gateways that don't surface on the homepage. Best-effort
+            # and additive: the union only adds gateways, never drops homepage hits.
+            if Config.DEEP_SCAN_ENABLED and response.status == 200 and text:
+                _merged = await deep_scan_gateways(
+                    base_url=str(response.url),
+                    homepage_html=text,
+                    session=session,
+                    headers=headers,
+                    known_gateways=analysis["gateways"],
+                    proxy_kwargs=_aiohttp_proxy_kwargs(_proxy),
+                    fetcher=_make_curl_fetcher(_proxy) if _should_curl_first(url) else None,
+                )
+                _new = [g for g in _merged if g not in analysis["gateways"]]
+                if _new:
+                    analysis["gateways"] = list(analysis["gateways"]) + _new
+                    logger.info(
+                        f"Deep scan added {len(_new)} gateway(s) for {url}: "
+                        f"{', '.join(_new)}"
+                    )
 
             logger.info(
                 f"Successfully checked {url} - Status: {response.status}, "
@@ -537,6 +823,15 @@ async def check_url(
         # Don't retry client errors (4xx) - these are permanent
         if 400 <= status_code < 500:
             logger.error(f"HTTP client error for {url}: {status_code}")
+            # Anti-bot block (403/429): try the browser-impersonation client first.
+            if status_code in (403, 429) and Config.CURL_CFFI_ON_BLOCK and CURL_CFFI_AVAILABLE:
+                _mark_curl_domain(url)
+                logger.warning(
+                    f"{status_code} for {url} - trying curl_cffi (browser TLS impersonation)"
+                )
+                _bypass = await _curl_cffi_attempt(url, use_cache)
+                if _bypass is not None:
+                    return _bypass
             if status_code == 403:
                 logger.warning(
                     f"Access Denied (403) for {url} - server is blocking bot requests. "
@@ -564,84 +859,15 @@ async def check_url(
                     await asyncio.sleep(0.5)
                     return await check_url(url, None, retry_count + 1, use_cache)
 
-                elif retry_count == 1 and CURL_CFFI_AVAILABLE:
-                    # Second fallback: use curl_cffi with browser TLS impersonation
-                    # This bypasses CDN/WAF TLS fingerprinting (JA3/JA4)
+                elif retry_count == 1:
+                    # Second fallback: browser TLS impersonation (JA3/HTTP2) via curl_cffi
+                    _mark_curl_domain(url)
                     logger.warning(
                         f"Bad Request (400) for {url} - retrying with curl_cffi (browser TLS)..."
                     )
-                    try:
-                        (
-                            text,
-                            curl_status,
-                            curl_headers,
-                        ) = await _async_fetch_with_curl_cffi(
-                            url, timeout=Config.REQUEST_TIMEOUT
-                        )
-
-                        # Apply the same size cap to curl_cffi responses.
-                        # curl_cffi returns the full body as a string; truncate
-                        # to MAX_RESPONSE_BYTES worth of characters.
-                        if len(text.encode("utf-8", errors="replace")) > MAX_RESPONSE_BYTES:
-                            text = text.encode("utf-8", errors="replace")[:MAX_RESPONSE_BYTES].decode("utf-8", errors="replace")
-                            logger.warning(
-                                f"curl_cffi response body capped at {MAX_RESPONSE_BYTES // 1024} KB for {url[:60]}"
-                            )
-
-                        if curl_status == 200:
-                            logger.info(
-                                f"curl_cffi succeeded for {url} - bypassed TLS fingerprinting"
-                            )
-
-                            # Use the detection module to analyze the response
-                            analysis = analyze_url_response(
-                                html=text, headers=curl_headers, status_code=curl_status
-                            )
-                            platform_detection = detect_ecommerce_platform(
-                                html=text, headers=curl_headers
-                            )
-                            platform_name = (
-                                platform_detection["platform"]
-                                if platform_detection["platform"]
-                                else "None detected"
-                            )
-                            cart_abandonment = detect_cart_abandonment_tools(
-                                html=text, headers=curl_headers
-                            )
-                            cart_summary = cart_abandonment["summary"]
-
-                            # Cache successful result
-                            if use_cache:
-                                cache_data = {
-                                    "gateways": analysis["gateways"],
-                                    "status_code": curl_status,
-                                    "captcha": analysis["captcha"],
-                                    "cloudflare": analysis["cloudflare"],
-                                    "security_type": analysis["security_type"],
-                                    "cvv_status": analysis["cvv_status"],
-                                    "inbuilt_status": analysis["inbuilt_status"],
-                                    "ecommerce_platform": platform_name,
-                                    "cart_abandonment": cart_summary,
-                                }
-                                await save_to_cache(url, cache_data)
-
-                            return (
-                                analysis["gateways"],
-                                curl_status,
-                                analysis["captcha"],
-                                analysis["cloudflare"],
-                                analysis["security_type"],
-                                analysis["cvv_status"],
-                                analysis["inbuilt_status"],
-                                platform_name,
-                                cart_summary,
-                            )
-                        else:
-                            logger.warning(
-                                f"curl_cffi got status {curl_status} for {url}"
-                            )
-                    except Exception as curl_err:
-                        logger.error(f"curl_cffi failed for {url}: {curl_err}")
+                    _bypass = await _curl_cffi_attempt(url, use_cache)
+                    if _bypass is not None:
+                        return _bypass
 
                 logger.warning(
                     f"Bad Request (400) for {url} - server rejected request format. "
@@ -696,7 +922,7 @@ async def check_url(
             "None detected",
         )
 
-    except aiohttp.ServerTimeoutError:
+    except asyncio.TimeoutError:  # covers total, sock_read, sock_connect, and ServerTimeoutError (subclass)
         # Retry timeouts - could be temporary network congestion
         if retry_count < MAX_RETRIES:
             delay = RETRY_DELAY * (RETRY_BACKOFF**retry_count)
