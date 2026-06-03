@@ -9,6 +9,7 @@ Run with: python bot_aiogram.py
 
 import asyncio
 import logging
+import os
 import signal
 from typing import List, Optional
 from datetime import datetime
@@ -2733,6 +2734,253 @@ async def process_urls_async(
 
 
 # =============================================================================
+# BULK URL SCANNING - helpers (batched scan + per-user output file)
+# =============================================================================
+
+def _result_to_record(url: str, response) -> dict:
+    """Convert a ``check_url()`` response (or an Exception) into an export record.
+
+    The dict keys deliberately match the schema consumed by ``_build_csv`` /
+    ``_build_json`` / ``_build_txt`` so the same builders power both the
+    scan-history export and the /bulk output file.
+    """
+    record = {
+        "url": url,
+        "scanned_at": datetime.now().isoformat(),
+        "status_code": 0,
+        "gateways": [],
+        "security_type": "N/A",
+        "cvv_status": "N/A",
+        "cloudflare": False,
+        "captcha": False,
+        "inbuilt_payment": False,
+        "ecommerce_platform": "None detected",
+        "cart_abandonment": "None detected",
+    }
+
+    if isinstance(response, Exception):
+        record["security_type"] = f"ERROR: {str(response)[:80]}"
+        return record
+
+    try:
+        (detected_gateways, status_code, captcha, cloudflare,
+         payment_security_type, cvv_cvc_status, inbuilt_status,
+         ecommerce_platform, cart_abandonment) = response
+        inbuilt_lower = str(inbuilt_status).lower()
+        record.update({
+            "status_code": status_code,
+            "gateways": list(detected_gateways) if detected_gateways else [],
+            "security_type": payment_security_type,
+            "cvv_status": cvv_cvc_status,
+            "cloudflare": bool(cloudflare),
+            "captcha": bool(captcha),
+            "inbuilt_payment": "detected" in inbuilt_lower or "yes" in inbuilt_lower,
+            "ecommerce_platform": ecommerce_platform,
+            "cart_abandonment": cart_abandonment,
+        })
+    except Exception as e:  # malformed response shape — record as an error row
+        record["security_type"] = f"ERROR: {str(e)[:80]}"
+
+    return record
+
+
+def _format_bulk_progress(done: int, total: int, batch_num: int,
+                          total_batches: int, gateways_found: int,
+                          errors: int) -> str:
+    """Render the live progress box edited into the status message per batch."""
+    pct = int(done * 100 / total) if total else 100
+    filled = min(10, pct // 10)
+    bar = "█" * filled + "░" * (10 - filled)
+    return (
+        "╭───────────────────────────╮\n"
+        "│   ⏳  BULK SCANNING       │\n"
+        "╰───────────────────────────╯\n"
+        "\n"
+        f"Batch {batch_num}/{total_batches}\n"
+        f"[{bar}] {pct}%\n"
+        "\n"
+        "┌─ PROGRESS ────────────────\n"
+        "│\n"
+        f"│  ✓  Scanned   : {done}/{total}\n"
+        f"│  💳 Gateways  : {gateways_found}\n"
+        f"│  ⚠️  Errors    : {errors}\n"
+        "│\n"
+        "└────────────────────────────\n"
+        "\n"
+        "Please wait..."
+    )
+
+
+async def _run_bulk_scan(urls: List[str], user_id: int, output_path: str,
+                         status_message: Optional[Message] = None) -> tuple:
+    """Scan ``urls`` in batches of ``Config.BULK_BATCH_SIZE``.
+
+    Each result is appended as a JSON line to ``output_path`` (the per-user
+    output file). The status message is edited after every batch with progress.
+
+    Returns ``(written, gateways_found, errors)``.
+    """
+    import json
+    import time
+
+    session = await get_http_session()
+    total = len(urls)
+    batch_size = max(1, Config.BULK_BATCH_SIZE)
+    total_batches = (total + batch_size - 1) // batch_size
+    written = 0
+    gateways_found = 0
+    errors = 0
+
+    # Throttle progress edits so large files don't trip Telegram's edit flood
+    # limits (still always render the final batch).
+    last_edit = 0.0
+    PROGRESS_EDIT_INTERVAL = 2.5
+
+    # Open in write mode to truncate any previous run's results for this user.
+    with open(output_path, "w", encoding="utf-8") as fh:
+        for batch_index in range(total_batches):
+            start = batch_index * batch_size
+            chunk = urls[start:start + batch_size]
+
+            logger.info(
+                f"User {user_id} bulk batch {batch_index + 1}/{total_batches} "
+                f"({len(chunk)} URLs)"
+            )
+
+            responses = await asyncio.gather(
+                *(check_url(u, session) for u in chunk),
+                return_exceptions=True,
+            )
+
+            for u, response in zip(chunk, responses):
+                record = _result_to_record(u, response)
+                if isinstance(response, Exception) or record["status_code"] == 0:
+                    errors += 1
+                elif record["gateways"]:
+                    gateways_found += 1
+                fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+                written += 1
+
+            fh.flush()
+
+            # Throttled progress; the handler renders the final counts on
+            # completion, so no forced edit on the last batch is needed.
+            now = time.monotonic()
+            if status_message is not None and now - last_edit >= PROGRESS_EDIT_INTERVAL:
+                last_edit = now
+                try:
+                    await status_message.edit_text(
+                        _format_bulk_progress(
+                            written, total, batch_index + 1, total_batches,
+                            gateways_found, errors,
+                        )
+                    )
+                except Exception as e:  # stale/identical edit — never fatal
+                    logger.debug(f"Bulk progress edit skipped: {e}")
+
+    return written, gateways_found, errors
+
+
+def _read_bulk_records(path: str) -> list:
+    """Read the per-user JSONL output file back into a list of record dicts."""
+    import json
+
+    records = []
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except OSError:
+        return []
+    return records
+
+
+def _bulk_format_keyboard() -> InlineKeyboardMarkup:
+    """Buttons asking the user to pick the bulk output format."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📊 CSV",  callback_data="bulkfmt_csv"),
+            InlineKeyboardButton(text="📄 TXT",  callback_data="bulkfmt_txt"),
+            InlineKeyboardButton(text="📋 JSON", callback_data="bulkfmt_json"),
+        ],
+    ])
+
+
+async def _send_bulk_export(callback: CallbackQuery, state: FSMContext, fmt: str) -> None:
+    """Build the requested format from the user's bulk output file and send it."""
+    from aiogram.types import BufferedInputFile
+
+    data_state = await state.get_data()
+    output_path = data_state.get("bulk_output_path")
+
+    if not output_path or not os.path.exists(output_path):
+        await callback.answer(
+            "⚠️ These results expired. Please run /bulk again.", show_alert=True
+        )
+        return
+
+    records = _read_bulk_records(output_path)
+    if not records:
+        await callback.answer("📭 No results to export.", show_alert=True)
+        return
+
+    await callback.answer()
+    processing = await callback.message.answer("⏳ Generating your file...")
+
+    try:
+        if fmt == "csv":
+            payload = _build_csv(records)
+            ext, label = "csv", "CSV"
+        elif fmt == "json":
+            payload = _build_json(records)
+            ext, label = "json", "JSON"
+        else:
+            payload = _build_txt(records)
+            ext, label = "txt", "TXT"
+
+        filename = (
+            f"bulk_scan_{callback.from_user.id}_"
+            f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
+        )
+        file = BufferedInputFile(payload, filename=filename)
+        caption = (
+            f"📤 Bulk scan results ({label})\n"
+            f"URLs: {len(records)}\n"
+            f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        )
+        await callback.message.answer_document(file, caption=caption)
+    finally:
+        try:
+            await processing.delete()
+        except Exception:
+            pass
+
+
+@router.callback_query(F.data == "bulkfmt_csv")
+async def callback_bulk_csv(callback: CallbackQuery, state: FSMContext):
+    """Send bulk scan results as CSV."""
+    await _send_bulk_export(callback, state, "csv")
+
+
+@router.callback_query(F.data == "bulkfmt_txt")
+async def callback_bulk_txt(callback: CallbackQuery, state: FSMContext):
+    """Send bulk scan results as plain text."""
+    await _send_bulk_export(callback, state, "txt")
+
+
+@router.callback_query(F.data == "bulkfmt_json")
+async def callback_bulk_json(callback: CallbackQuery, state: FSMContext):
+    """Send bulk scan results as JSON."""
+    await _send_bulk_export(callback, state, "json")
+
+
+# =============================================================================
 # BULK URL SCANNING - File Upload Handler
 # =============================================================================
 
@@ -2881,10 +3129,14 @@ async def cmd_bulk_check(message: Message, state: FSMContext):
         await message.answer(file_too_large_msg)
         return
 
+    # Per-user output file (one accumulating file per user, overwritten each run)
+    os.makedirs(Config.BULK_RESULTS_DIR, exist_ok=True)
+    output_path = os.path.join(Config.BULK_RESULTS_DIR, f"bulk_{user_id}.jsonl")
+
     # Download and parse file
     try:
-        # Send download status
-        download_msg = await message.answer(
+        # Single status message reused for the whole flow (edited in place).
+        status_msg = await message.answer(
             "╭───────────────────────────╮\n"
             "│   📥  DOWNLOADING FILE    │\n"
             "╰───────────────────────────╯\n"
@@ -2909,8 +3161,7 @@ async def cmd_bulk_check(message: Message, state: FSMContext):
                 raw_urls.append(line)
 
         if not raw_urls:
-            await download_msg.delete()
-            no_urls_msg = (
+            await status_msg.edit_text(
                 "╭───────────────────────────╮\n"
                 "│   ❌  NO URLs FOUND       │\n"
                 "╰───────────────────────────╯\n"
@@ -2927,7 +3178,6 @@ async def cmd_bulk_check(message: Message, state: FSMContext):
                 "└────────────────────────────"
                 + get_footer()
             )
-            await message.answer(no_urls_msg)
             return
 
         # Sanitize and normalize URLs
@@ -2943,8 +3193,7 @@ async def cmd_bulk_check(message: Message, state: FSMContext):
                 logger.warning(f"Skipped suspicious URL in bulk scan: {raw_url[:50]}")
 
         if not urls:
-            await download_msg.delete()
-            all_blocked_msg = (
+            await status_msg.edit_text(
                 "╭───────────────────────────╮\n"
                 "│   ⚠️  ALL URLs BLOCKED    │\n"
                 "╰───────────────────────────╯\n"
@@ -2956,117 +3205,86 @@ async def cmd_bulk_check(message: Message, state: FSMContext):
                 "Please provide valid HTTP(S) URLs."
                 + get_footer()
             )
-            await message.answer(all_blocked_msg)
             return
 
-        # Check URL limit
-        if len(urls) > Config.MAX_URLS_PER_REQUEST:
-            urls = urls[:Config.MAX_URLS_PER_REQUEST]
-            await download_msg.delete()
-            limited_msg = (
-                "╭───────────────────────────╮\n"
-                "│   ⚠️  URL LIMIT REACHED   │\n"
-                "╰───────────────────────────╯\n"
-                "\n"
-                f"File contains {len(raw_urls)} URLs.\n"
-                f"Processing first {Config.MAX_URLS_PER_REQUEST} URLs.\n"
-                "\n"
-                "┌─ NOTE ────────────────────\n"
-                "│\n"
-                "│  For larger batches, split\n"
-                "│  into multiple files.\n"
-                "│\n"
-                "└────────────────────────────\n"
-            )
-            await message.answer(limited_msg)
+        # Enforce the bulk ceiling (process everything up to the cap, in batches).
+        truncated = False
+        dropped = 0
+        if len(urls) > Config.MAX_BULK_URLS:
+            dropped = len(urls) - Config.MAX_BULK_URLS
+            urls = urls[:Config.MAX_BULK_URLS]
+            truncated = True
 
-        # Update download message to show parsing success
+        # Show parse summary on the same message before scanning starts.
         url_word = "URL" if len(urls) == 1 else "URLs"
-        await download_msg.edit_text(
+        await status_msg.edit_text(
             "╭───────────────────────────╮\n"
             "│   ✅  FILE PARSED         │\n"
             "╰───────────────────────────╯\n"
             "\n"
             f"📋 Found: {len(urls)} {url_word}\n"
             f"⚠️ Skipped: {skipped} suspicious\n"
+            f"📦 Batch size: {Config.BULK_BATCH_SIZE}\n"
             "\n"
             "Starting scan..."
         )
 
-        # Wait a moment for user to read
-        await asyncio.sleep(1)
+        if truncated:
+            # Separate, standalone note so it doesn't disturb the live status msg.
+            await message.answer(
+                "╭───────────────────────────╮\n"
+                "│   ⚠️  URL LIMIT REACHED   │\n"
+                "╰───────────────────────────╯\n"
+                "\n"
+                f"File contains {len(raw_urls)} URLs.\n"
+                f"Scanning the first {Config.MAX_BULK_URLS:,};\n"
+                f"{dropped:,} extra URL(s) were skipped.\n"
+                "\n"
+                "┌─ NOTE ────────────────────\n"
+                "│\n"
+                "│  Split very large lists\n"
+                "│  into multiple files.\n"
+                "│\n"
+                "└────────────────────────────\n"
+            )
 
-        # Create processing message
-        processing_msg = await message.answer(
+        # Scan all URLs in batches, appending each result to the per-user file.
+        logger.info(
+            f"User {user_id} initiated bulk scan of {len(urls)} URLs "
+            f"from file: {document.file_name}"
+        )
+        written, gateways_found, errors = await _run_bulk_scan(
+            urls, user_id, output_path, status_msg
+        )
+
+        # Remember where this user's results live + recent URLs for rescans.
+        await state.update_data(
+            bulk_output_path=output_path,
+            bulk_url_count=written,
+            bulk_filename=document.file_name,
+            last_urls=urls,
+        )
+
+        # Ask the user to pick an output format.
+        await status_msg.edit_text(
             "╭───────────────────────────╮\n"
-            "│   ⏳  BULK SCANNING       │\n"
+            "│   ✅  BULK SCAN COMPLETE  │\n"
             "╰───────────────────────────╯\n"
             "\n"
-            f"Analyzing {len(urls)} {url_word}...\n"
+            f"📄 {document.file_name[:24]}\n"
             "\n"
-            "┌─ CHECKING ────────────────\n"
+            "┌─ SUMMARY ─────────────────\n"
             "│\n"
-            "│  ›  Payment gateways\n"
-            "│  ›  Security features\n"
-            "│  ›  Protection systems\n"
+            f"│  ✓  Scanned   : {written}\n"
+            f"│  💳 Gateways  : {gateways_found}\n"
+            f"│  ⚠️  Errors    : {errors}\n"
             "│\n"
             "└────────────────────────────\n"
             "\n"
-            "Please wait..."
+            "Choose your output format 👇"
+            + get_footer(),
+            reply_markup=_bulk_format_keyboard(),
         )
-
-        # Delete download message
-        try:
-            await download_msg.delete()
-        except:
-            pass
-
-        # Process URLs using existing async function
-        logger.info(f"User {user_id} initiated bulk scan of {len(urls)} URLs from file: {document.file_name}")
-        results = await process_urls_async(urls, user_id, processing_msg)
-
-        # Delete processing message
-        try:
-            await processing_msg.delete()
-        except:
-            pass
-
-        # Send results
-        if results:
-            # Save URLs to state for rescan functionality
-            await state.update_data(last_urls=urls)
-
-            # Create header
-            url_count = len(urls)
-            url_word = "URL" if url_count == 1 else "URLs"
-            count_text = f"Analyzed {url_count} {url_word}"
-            count_padded = count_text + " " * (25 - len(count_text))
-
-            header = (
-                "╭───────────────────────────╮\n"
-                "│   ✅  BULK SCAN COMPLETE  │\n"
-                f"│   {count_padded}│\n"
-                "│   📄 " + document.file_name[:20].ljust(20) + " │\n"
-                "╰───────────────────────────╯"
-            )
-
-            await message.answer(header)
-
-            # Send each result
-            footer = get_footer()
-            for i, result in enumerate(results):
-                msg_text = result.rstrip() + footer
-
-                # Add Quick Rescan button
-                keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🔄 Quick Rescan", callback_data=f"quick_rescan_{i}")]
-                ])
-
-                await message.answer(msg_text, reply_markup=keyboard)
-
-                # Small delay between messages to avoid flooding
-                if i < len(results) - 1:
-                    await asyncio.sleep(0.1)
 
     except UnicodeDecodeError:
         logger.error(f"Failed to decode file {document.file_name}")

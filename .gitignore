@@ -12,6 +12,9 @@ __pycache__/
 *$py.class
 *.so
 
+# Bulk scan per-user output files
+bulk_results/
+
 # Logs
 *.log
 bot.log
