@@ -1,9 +1,48 @@
 """Configuration management for the Telegram Gateway Hunter Bot."""
 import os
+from typing import Optional, List
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+
+
+def _normalize_proxy(entry):
+    """Normalize one proxy-file line to a full URL, or None if unrecognized."""
+    entry = entry.strip()
+    if not entry:
+        return None
+    if '://' in entry:
+        return entry
+    parts = entry.split(':')
+    if len(parts) == 2:
+        host, port = parts
+        return f"http://{host}:{port}"
+    if len(parts) == 4:
+        host, port, user, pwd = parts
+        return f"http://{user}:{pwd}@{host}:{port}"
+    return None
+
+
+def _load_proxy_file(path):
+    """Read proxies from a text file (one per line). Full URLs or bare
+    host:port / host:port:user:pass (schemeless -> http://). '#' comments and
+    blank lines ignored. Missing/unreadable file -> []. Never raises."""
+    out = []
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+    except OSError:
+        return out
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith('#'):
+            continue
+        norm = _normalize_proxy(line)
+        if norm:
+            out.append(norm)
+    return out
+
 
 class Config:
     """Bot configuration from environment variables."""
@@ -37,8 +76,11 @@ class Config:
     # Anti-bot / proxy settings (all optional).
     # PROXY_URL: single proxy, e.g. http://user:pass@host:port (http/https/socks5).
     # PROXY_LIST: comma-separated proxies; one is chosen per request (rotation).
+    PROXY_FILE = os.getenv('PROXY_FILE', 'proxies.txt')
     PROXY_URL = os.getenv('PROXY_URL', '').strip()
     PROXY_LIST = [p.strip() for p in os.getenv('PROXY_LIST', '').split(',') if p.strip()]
+    PROXY_LIST += _load_proxy_file(PROXY_FILE)
+    PROXY_LIST = list(dict.fromkeys(PROXY_LIST))  # de-dupe, preserve order
     # Promote curl_cffi (browser TLS/JA3/HTTP2 impersonation) to the primary fetch for a
     # domain after it returns a block/challenge, instead of only as a 400 fallback.
     CURL_CFFI_ON_BLOCK = os.getenv('CURL_CFFI_ON_BLOCK', 'true').lower() == 'true'

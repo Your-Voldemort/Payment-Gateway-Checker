@@ -10,6 +10,7 @@ Run with: python bot_aiogram.py
 import asyncio
 import logging
 import os
+import re
 import signal
 from typing import List, Optional
 from datetime import datetime
@@ -24,6 +25,26 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramNetworkError
+
+# Proxy connection failures (dead/unreachable proxy) are raised by the optional
+# aiohttp-socks / python-socks deps and are NOT subclasses of aiohttp.ClientError,
+# so aiogram does not wrap them in TelegramNetworkError. We catch them explicitly
+# in the connection-failover loop so a bad proxy fails over instead of crashing.
+_PROXY_ERRORS: tuple = ()
+try:
+    from aiohttp_socks._errors import (
+        ProxyConnectionError as _AioSocksConnErr,
+        ProxyError as _AioSocksProxyErr,
+        ProxyTimeoutError as _AioSocksTimeoutErr,
+    )
+    _PROXY_ERRORS += (_AioSocksConnErr, _AioSocksProxyErr, _AioSocksTimeoutErr)
+except ImportError:
+    pass
+try:
+    from python_socks._errors import ProxyException as _PySocksProxyErr
+    _PROXY_ERRORS += (_PySocksProxyErr,)
+except ImportError:
+    pass
 
 from config import Config
 from logger import setup_logger
@@ -3401,6 +3422,10 @@ async def handle_document(message: Message):
 # MAIN ENTRY POINT
 # =============================================================================
 
+def _redact_proxy(p):
+    return re.sub(r"//[^@]*@", "//", p) if p else "direct connection"
+
+
 async def main():
     """Main function to start the bot."""
     logger.info("Starting bot with aiogram 3.x...")
@@ -3432,19 +3457,9 @@ async def main():
     except ImportError:
         pass
 
-    # Create bot and dispatcher
-    proxy = _pick_proxy()
-    session = AiohttpSession(proxy=proxy) if proxy else None
-    if proxy:
-        # redact credentials: log scheme://host:port only
-        import re
-        safe = re.sub(r"//[^@]*@", "//", proxy)
-        logger.info(f"Routing Telegram traffic through proxy {safe}")
-    bot = Bot(
-        token=Config.TELEGRAM_BOT_TOKEN,
-        session=session,
-        default=DefaultBotProperties(parse_mode=None)  # Plain text mode
-    )
+    # Create dispatcher. The bot is created inside the connection loop below so we
+    # can fail over across proxy candidates before polling starts.
+    bot = None
     dp = Dispatcher(storage=SQLiteStorage())
 
     # Include router
@@ -3535,22 +3550,36 @@ async def main():
     # Register shutdown callback
     dp.shutdown.register(on_shutdown)
 
-    logger.info("Verifying connection to Telegram API...")
+    proxies = list(Config.PROXY_LIST) or ([Config.PROXY_URL] if Config.PROXY_URL else [None])
+    n = len(proxies)
+    logger.info(f"Verifying connection to Telegram API... ({sum(1 for p in proxies if p)} proxy candidate(s))")
     try:
         backoff = 1
+        i = 0
         while True:
+            proxy = proxies[i % n]
+            i += 1
+            session = AiohttpSession(proxy=proxy) if proxy else None
+            candidate = Bot(
+                token=Config.TELEGRAM_BOT_TOKEN,
+                session=session,
+                default=DefaultBotProperties(parse_mode=None),  # Plain text mode
+            )
             try:
-                me = await bot.get_me(request_timeout=15)
-                logger.info(f"Connected to Telegram as @{me.username}")
+                me = await candidate.get_me(request_timeout=15)
+                bot = candidate
+                logger.info(f"Connected to Telegram as @{me.username} via {_redact_proxy(proxy)}")
                 break
-            except TelegramNetworkError as e:
+            except (TelegramNetworkError, *_PROXY_ERRORS) as e:
+                await candidate.session.close()
                 logger.warning(
-                    f"Cannot reach the Telegram API ({e}). Your network may be blocking Telegram. "
-                    f"Retrying in {backoff}s. Set PROXY_URL or PROXY_LIST in .env "
-                    f"(http/https/socks5) or use a VPN."
+                    f"Cannot reach Telegram via {_redact_proxy(proxy)} ({e}). Trying next proxy. "
+                    f"Add/fix entries in {Config.PROXY_FILE} (or PROXY_URL/PROXY_LIST), "
+                    f"or fix DNS (1.1.1.1/8.8.8.8) / use a VPN."
                 )
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 60)
+                if i % n == 0:  # completed a full cycle through all candidates
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2, 60)
 
         logger.info("Bot is now polling for updates...")
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
@@ -3558,7 +3587,8 @@ async def main():
         # start_polling fires dp.shutdown/on_shutdown on its own exit, but if we exit before
         # polling starts (e.g. Ctrl+C during the connectivity retry loop) the session opened by
         # get_me() would leak — so close it here. AiohttpSession.close() is idempotent.
-        await bot.session.close()
+        if bot is not None:
+            await bot.session.close()
 
 
 if __name__ == "__main__":
