@@ -22,3 +22,6 @@ pyahocorasick>=2.0.0
 
 # Fake user agent for rotating realistic user agents
 fake-useragent>=2.2.0
+
+# SOCKS/HTTP proxy support for routing the bot through a proxy (needed when network blocks Telegram)
+aiohttp-socks>=0.8

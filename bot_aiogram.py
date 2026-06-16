@@ -21,11 +21,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from fsm_storage import SQLiteStorage
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramNetworkError
 
 from config import Config
 from logger import setup_logger
-from gateway_checker import check_url
+from gateway_checker import check_url, _pick_proxy
 from user_manager import (
     async_register_user, async_get_user_count, async_is_user_registered,
     async_check_subscription, async_add_subscription, async_get_subscription_expiry,
@@ -3431,8 +3433,16 @@ async def main():
         pass
 
     # Create bot and dispatcher
+    proxy = _pick_proxy()
+    session = AiohttpSession(proxy=proxy) if proxy else None
+    if proxy:
+        # redact credentials: log scheme://host:port only
+        import re
+        safe = re.sub(r"//[^@]*@", "//", proxy)
+        logger.info(f"Routing Telegram traffic through proxy {safe}")
     bot = Bot(
         token=Config.TELEGRAM_BOT_TOKEN,
+        session=session,
         default=DefaultBotProperties(parse_mode=None)  # Plain text mode
     )
     dp = Dispatcher(storage=SQLiteStorage())
@@ -3525,8 +3535,30 @@ async def main():
     # Register shutdown callback
     dp.shutdown.register(on_shutdown)
 
-    logger.info("Bot is now polling for updates...")
-    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    logger.info("Verifying connection to Telegram API...")
+    try:
+        backoff = 1
+        while True:
+            try:
+                me = await bot.get_me(request_timeout=15)
+                logger.info(f"Connected to Telegram as @{me.username}")
+                break
+            except TelegramNetworkError as e:
+                logger.warning(
+                    f"Cannot reach the Telegram API ({e}). Your network may be blocking Telegram. "
+                    f"Retrying in {backoff}s. Set PROXY_URL or PROXY_LIST in .env "
+                    f"(http/https/socks5) or use a VPN."
+                )
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60)
+
+        logger.info("Bot is now polling for updates...")
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    finally:
+        # start_polling fires dp.shutdown/on_shutdown on its own exit, but if we exit before
+        # polling starts (e.g. Ctrl+C during the connectivity retry loop) the session opened by
+        # get_me() would leak — so close it here. AiohttpSession.close() is idempotent.
+        await bot.session.close()
 
 
 if __name__ == "__main__":
