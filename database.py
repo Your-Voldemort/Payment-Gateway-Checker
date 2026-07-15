@@ -72,8 +72,12 @@ class Database:
                 """)
                 logger.info("Added ecommerce_platform column to scan_history table")
             except Exception as e:
-                # Column already exists or other error - safe to ignore
-                pass
+                # Column already exists or other error - check if it's a duplicate column
+                if "duplicate column" in str(e) or "already exists" in str(e):
+                    pass
+                else:
+                    logger.error(f"Migration error for ecommerce_platform: {e}")
+                    raise
             
             # Add cart_abandonment column if it doesn't exist (migration)
             try:
@@ -82,8 +86,12 @@ class Database:
                 """)
                 logger.info("Added cart_abandonment column to scan_history table")
             except Exception as e:
-                # Column already exists or other error - safe to ignore
-                pass
+                # Column already exists or other error - check if it's a duplicate column
+                if "duplicate column" in str(e) or "already exists" in str(e):
+                    pass
+                else:
+                    logger.error(f"Migration error for cart_abandonment: {e}")
+                    raise
             
             # Rate limiter persistence table
             await db.execute("""

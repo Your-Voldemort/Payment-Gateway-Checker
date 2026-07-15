@@ -477,7 +477,7 @@ def _make_curl_fetcher(proxy: Optional[str]):
 async def _curl_cffi_attempt(url: str, use_cache: bool):
     """Fetch via curl_cffi (browser TLS impersonation, optional proxy), analyze, cache.
 
-    Returns the standard 9-tuple on a genuine 200, or None if curl_cffi is unavailable,
+    Returns the standard 10-tuple on a genuine 200, or None if curl_cffi is unavailable,
     errored, returned non-200, or returned another challenge page. Also runs the deep
     scan (P1/P2) through curl_cffi so hard domains keep checkout/JS coverage.
     """
@@ -533,6 +533,19 @@ async def _curl_cffi_attempt(url: str, use_cache: bool):
             logger.debug(f"curl deep scan failed for {url}: {deep_err}")
 
     await _circuit_breaker.record_success(url)
+
+    # Serialize gateway_matches for cache storage
+    gateway_matches = analysis.get("gateway_matches", {})
+    serialized_matches = {
+        name: {
+            "name": m.name,
+            "confidence": m.confidence,
+            "evidence": m.evidence,
+            "category": m.category,
+        }
+        for name, m in gateway_matches.items()
+    }
+
     if use_cache:
         await save_to_cache(url, {
             "gateways": analysis["gateways"],
@@ -544,6 +557,7 @@ async def _curl_cffi_attempt(url: str, use_cache: bool):
             "inbuilt_status": analysis["inbuilt_status"],
             "ecommerce_platform": platform_name,
             "cart_abandonment": cart_summary,
+            "gateway_matches": serialized_matches,
         })
 
     return (
@@ -556,6 +570,7 @@ async def _curl_cffi_attempt(url: str, use_cache: bool):
         analysis["inbuilt_status"],
         platform_name,
         cart_summary,
+        gateway_matches,
     )
 
 
@@ -564,7 +579,7 @@ async def check_url(
     session: Optional[aiohttp.ClientSession] = None,
     retry_count: int = 0,
     use_cache: bool = True,
-) -> Tuple[List[str], int, bool, bool, str, str, str, str, str]:
+) -> Tuple[List[str], int, bool, bool, str, str, str, str, str, Dict]:
     """
     Check the provided URL for payment gateways, security features, e-commerce platform, and cart abandonment tools.
     Includes automatic retry logic for transient failures (5xx errors, timeouts, connection errors).
@@ -588,6 +603,7 @@ async def check_url(
             - Inbuilt payment system status
             - E-commerce platform name (or "None detected")
             - Cart abandonment tools summary (or "None detected")
+            - Dict of gateway_matches {name: GatewayMatch} with confidence data
     """
     if not is_valid_url(url):
         logger.warning(f"Invalid URL provided: {url}")
@@ -601,6 +617,7 @@ async def check_url(
             "N/A",
             "None detected",
             "None detected",
+            {},
         )
 
     # -------------------------------------------------------------------------
@@ -626,6 +643,7 @@ async def check_url(
                 "N/A",
                 "None detected",
                 "None detected",
+                {},
             )
 
     # Check cache first (now checks on retry attempts too for performance)
@@ -633,6 +651,18 @@ async def check_url(
         cached = await get_cached_result(url)
         if cached:
             logger.info(f"Cache hit for {url[:50]} (attempt {retry_count + 1})")
+            # Deserialize gateway_matches from cache if present
+            cached_matches_raw = cached.get("gateway_matches", {})
+            from detection import GatewayMatch
+            cached_matches = {
+                name: GatewayMatch(
+                    name=m["name"],
+                    confidence=m["confidence"],
+                    evidence=m["evidence"],
+                    category=m["category"],
+                )
+                for name, m in cached_matches_raw.items()
+            } if cached_matches_raw else {}
             return (
                 cached.get("gateways", []),
                 cached.get("status_code", 200),
@@ -643,6 +673,7 @@ async def check_url(
                 cached.get("inbuilt_status", "N/A"),
                 cached.get("ecommerce_platform", "None detected"),
                 cached.get("cart_abandonment", "None detected"),
+                cached_matches,
             )
 
     # Use rotating user agent to minimize rate limiting
@@ -790,6 +821,20 @@ async def check_url(
             # Successful response — reset circuit breaker for this domain
             await _circuit_breaker.record_success(url)
 
+            # Extract gateway_matches for confidence data
+            gateway_matches = analysis.get("gateway_matches", {})
+
+            # Serialize gateway_matches for cache storage
+            serialized_matches = {
+                name: {
+                    "name": m.name,
+                    "confidence": m.confidence,
+                    "evidence": m.evidence,
+                    "category": m.category,
+                }
+                for name, m in gateway_matches.items()
+            }
+
             # Cache the result if successful (status 200) and caching is enabled
             if use_cache and response.status == 200:
                 cache_data = {
@@ -802,6 +847,7 @@ async def check_url(
                     "inbuilt_status": analysis["inbuilt_status"],
                     "ecommerce_platform": platform_name,
                     "cart_abandonment": cart_summary,
+                    "gateway_matches": serialized_matches,
                 }
                 await save_to_cache(url, cache_data)
 
@@ -815,6 +861,7 @@ async def check_url(
                 analysis["inbuilt_status"],
                 platform_name,
                 cart_summary,
+                gateway_matches,
             )
 
     except aiohttp.ClientResponseError as http_err:
@@ -848,6 +895,7 @@ async def check_url(
                     "N/A",
                     "None detected",
                     "None detected",
+                    {},
                 )
             elif status_code == 400:
                 # Phase 3: For 400 errors, try multiple fallback strategies
@@ -884,6 +932,7 @@ async def check_url(
                     "N/A",
                     "None detected",
                     "None detected",
+                    {},
                 )
             else:
                 return (
@@ -896,6 +945,7 @@ async def check_url(
                     "N/A",
                     "None detected",
                     "None detected",
+                    {},
                 )
 
         # Retry server errors (5xx) - these are often transient
@@ -920,6 +970,7 @@ async def check_url(
             "N/A",
             "None detected",
             "None detected",
+            {},
         )
 
     except asyncio.TimeoutError:  # covers total, sock_read, sock_connect, and ServerTimeoutError (subclass)
@@ -943,6 +994,7 @@ async def check_url(
             "N/A",
             "None detected",
             "None detected",
+            {},
         )
 
     except aiohttp.ClientConnectionError as conn_err:
@@ -968,6 +1020,7 @@ async def check_url(
             "N/A",
             "None detected",
             "None detected",
+            {},
         )
 
     except Exception as e:
@@ -982,6 +1035,7 @@ async def check_url(
             "N/A",
             "None detected",
             "None detected",
+            {},
         )
 
     finally:

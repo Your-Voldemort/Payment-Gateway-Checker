@@ -55,7 +55,7 @@ from user_manager import (
     async_get_all_user_ids, async_migrate_to_database
 )
 from rate_limiter import RateLimiter
-from utils import format_url_result, normalize_url
+from utils import format_url_result, normalize_url, format_error_result, format_bulk_summary
 from http_client import get_http_session, close_http_client
 from security import sanitize_url, sanitize_text_input, validate_duration
 from audit_log import log_admin_action, get_audit_logs, get_audit_log_stats
@@ -230,16 +230,18 @@ async def cmd_help(message: Message):
         "\n"
         "┌─ COMMANDS ────────────────\n"
         "│\n"
-        "│  /start     ─  Welcome screen\n"
-        "│  /register  ─  Activate access\n"
-        "│  /help      ─  This guide\n"
-        "│  /url <link> ─  Scan website\n"
-        "│  /bulk     ─  Bulk scan .txt file\n"
-        "│  /history   ─  View scan history\n"
-        "│  /stats     ─  Bot statistics ⚡\n"
-        "│  /auditlog  ─  Admin action log ⚡\n"
-        "│  /broadcast ─  Announcement ⚡\n"
-        "│  /cancel    ─  Cancel operation\n"
+        "│  /start      ─  Welcome screen\n"
+        "│  /register   ─  Activate access\n"
+        "│  /help       ─  This guide\n"
+        "│  /url <link>  ─  Scan website\n"
+        "│  /url_json    ─  Scan → JSON export\n"
+        "│  /url_csv     ─  Scan → CSV export\n"
+        "│  /bulk        ─  Bulk scan .txt file\n"
+        "│  /history     ─  View scan history\n"
+        "│  /stats       ─  Bot statistics ⚡\n"
+        "│  /auditlog    ─  Admin action log ⚡\n"
+        "│  /broadcast   ─  Announcement ⚡\n"
+        "│  /cancel      ─  Cancel operation\n"
         "│\n"
         "│  ⚡ = Owner only\n"
         "│\n"
@@ -2399,6 +2401,569 @@ async def callback_quick_rescan(callback: CallbackQuery, state: FSMContext):
 
 
 # =============================================================================
+# P1-2: INLINE BUTTON CALLBACKS — Details, JSON, CSV for scan results
+# =============================================================================
+
+@router.callback_query(F.data.startswith("scan_details_"))
+async def callback_scan_details(callback: CallbackQuery, state: FSMContext):
+    """Show detailed confidence breakdown for a scan result."""
+    data = await state.get_data()
+    urls = data.get('last_urls', [])
+
+    try:
+        index = int(callback.data.split("_")[2])
+        if not (0 <= index < len(urls)):
+            await callback.answer("❌ URL not found", show_alert=True)
+            return
+    except (IndexError, ValueError):
+        await callback.answer("❌ Invalid request", show_alert=True)
+        return
+
+    url = urls[index]
+    await callback.answer("📊 Loading details...")
+
+    # Re-scan to get fresh gateway_matches (or use cached)
+    try:
+        result = await check_url(url)
+        gateways, status_code, captcha, cloudflare, \
+            security_type, cvv_status, inbuilt_status, \
+            ecommerce_platform, cart_abandonment, \
+            gateway_matches = result
+
+        if not gateway_matches:
+            await callback.message.answer(
+                "╭───────────────────────────╮\n"
+                "│   📊  DETECTION DETAILS   │\n"
+                "╰───────────────────────────╯\n"
+                "\n"
+                f"🌐 {url[:50]}\n"
+                "\n"
+                "No gateways detected to show details for."
+                + get_footer()
+            )
+            return
+
+        from utils import format_gateways_by_category
+
+        # Build detailed breakdown with category grouping
+        details = (
+            "╭───────────────────────────╮\n"
+            "│   📊  DETECTION DETAILS   │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            f"🌐 {url[:50]}\n"
+            "\n"
+            "┌─ 💳 CONFIDENCE BREAKDOWN ─\n"
+            "│\n"
+        )
+
+        categorized = format_gateways_by_category(gateway_matches)
+        for line in categorized.split("\n"):
+            details += f"│  {line}\n"
+
+        details += (
+            "│\n"
+            "└────────────────────────────\n"
+            "\n"
+            "┌─ 📦 EVIDENCE SNIPPETS ────\n"
+            "│\n"
+        )
+
+        for name, match in sorted(gateway_matches.items(), key=lambda x: -x[1].confidence):
+            evidence = match.evidence[:50] if match.evidence else "N/A"
+            details += f"│  • {name}\n"
+            details += f"│    {match.category} | {match.confidence:.0%}\n"
+            details += f"│    {evidence}\n"
+            details += "│\n"
+
+        details += "└────────────────────────────\n"
+        details += get_footer()
+
+        await callback.message.answer(details)
+
+    except Exception as e:
+        logger.error(f"Error in scan_details: {e}")
+        await callback.message.answer(
+            "❌ Could not load details. Try rescanning."
+            + get_footer()
+        )
+
+
+@router.callback_query(F.data.startswith("scan_json_"))
+async def callback_scan_json(callback: CallbackQuery, state: FSMContext):
+    """Export a single scan result as JSON."""
+    from aiogram.types import BufferedInputFile
+    import json
+
+    data = await state.get_data()
+    urls = data.get('last_urls', [])
+
+    try:
+        index = int(callback.data.split("_")[2])
+        if not (0 <= index < len(urls)):
+            await callback.answer("❌ URL not found", show_alert=True)
+            return
+    except (IndexError, ValueError):
+        await callback.answer("❌ Invalid request", show_alert=True)
+        return
+
+    url = urls[index]
+    await callback.answer("📥 Generating JSON...")
+
+    try:
+        result = await check_url(url)
+        gateways, status_code, captcha, cloudflare, \
+            security_type, cvv_status, inbuilt_status, \
+            ecommerce_platform, cart_abandonment, \
+            gateway_matches = result
+
+        json_data = {
+            "url": url,
+            "scan_date": datetime.now().isoformat(),
+            "status_code": status_code,
+            "gateways": {
+                name: {
+                    "confidence": round(match.confidence, 3),
+                    "category": match.category,
+                    "evidence": match.evidence[:80] if match.evidence else "",
+                }
+                for name, match in gateway_matches.items()
+            } if gateway_matches else {},
+            "security": {
+                "3d_secure": "3d" in security_type.lower() or "secure" in security_type.lower(),
+                "otp": "otp" in security_type.lower(),
+                "captcha": captcha,
+                "cloudflare": cloudflare,
+                "cvv_cvc_required": "required" in cvv_status.lower() if cvv_status else False,
+                "inbuilt_payment": inbuilt_status.lower() in ("yes", "detected"),
+            },
+            "platform": {
+                "ecommerce": ecommerce_platform,
+                "cart_abandonment_tools": cart_abandonment,
+            },
+        }
+
+        json_str = json.dumps(json_data, indent=2, ensure_ascii=False)
+        filename = f"scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        file = BufferedInputFile(json_str.encode("utf-8"), filename=filename)
+
+        await callback.message.answer_document(
+            file,
+            caption=f"📊 Scan results for {url[:40]} (JSON)"
+        )
+
+    except Exception as e:
+        logger.error(f"Error in scan_json: {e}")
+        await callback.message.answer(
+            "❌ Could not generate JSON. Try rescanning."
+            + get_footer()
+        )
+
+
+@router.callback_query(F.data.startswith("scan_csv_"))
+async def callback_scan_csv(callback: CallbackQuery, state: FSMContext):
+    """Export a single scan result as CSV."""
+    from aiogram.types import BufferedInputFile
+    import csv
+    import io
+
+    data = await state.get_data()
+    urls = data.get('last_urls', [])
+
+    try:
+        index = int(callback.data.split("_")[2])
+        if not (0 <= index < len(urls)):
+            await callback.answer("❌ URL not found", show_alert=True)
+            return
+    except (IndexError, ValueError):
+        await callback.answer("❌ Invalid request", show_alert=True)
+        return
+
+    url = urls[index]
+    await callback.answer("📤 Generating CSV...")
+
+    try:
+        result = await check_url(url)
+        gateways, status_code, captcha, cloudflare, \
+            security_type, cvv_status, inbuilt_status, \
+            ecommerce_platform, cart_abandonment, \
+            gateway_matches = result
+
+        csv_buffer = io.StringIO()
+        writer = csv.writer(csv_buffer)
+
+        # Header
+        writer.writerow([
+            "URL", "Gateway", "Confidence", "Category",
+            "Status Code", "Platform", "3D Secure", "Captcha",
+            "Cloudflare", "CVV/CVC Required",
+        ])
+
+        # One row per gateway
+        if gateway_matches:
+            for name, match in sorted(gateway_matches.items(), key=lambda x: -x[1].confidence):
+                writer.writerow([
+                    url,
+                    name,
+                    f"{match.confidence:.1%}",
+                    match.category,
+                    status_code,
+                    ecommerce_platform,
+                    "Yes" if "3d" in security_type.lower() else "No",
+                    "Yes" if captcha else "No",
+                    "Yes" if cloudflare else "No",
+                    "Yes" if "required" in cvv_status.lower() else "No",
+                ])
+        elif gateways:
+            for gw in gateways:
+                writer.writerow([
+                    url, gw, "N/A", "N/A",
+                    status_code, ecommerce_platform,
+                    "Yes" if "3d" in security_type.lower() else "No",
+                    "Yes" if captcha else "No",
+                    "Yes" if cloudflare else "No",
+                    "Yes" if "required" in cvv_status.lower() else "No",
+                ])
+        else:
+            writer.writerow([
+                url, "None", "N/A", "N/A",
+                status_code, ecommerce_platform,
+                "No", "No", "No", "No",
+            ])
+
+        filename = f"scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        file = BufferedInputFile(csv_buffer.getvalue().encode("utf-8"), filename=filename)
+
+        await callback.message.answer_document(
+            file,
+            caption=f"📊 Scan results for {url[:40]} (CSV)"
+        )
+
+    except Exception as e:
+        logger.error(f"Error in scan_csv: {e}")
+        await callback.message.answer(
+            "❌ Could not generate CSV. Try rescanning."
+            + get_footer()
+        )
+
+
+# =============================================================================
+# P0-2: /url_json and /url_csv COMMANDS — Structured export
+# =============================================================================
+
+@router.message(Command("url_json"))
+async def cmd_url_json(message: Message, command: CommandObject, state: FSMContext):
+    """
+    Export URL scan results as JSON.
+
+    Usage:
+        /url_json https://stripe.com https://paypal.com
+
+    Returns:
+        Detailed JSON with full detection results including confidence scores
+    """
+    user_id = message.from_user.id
+
+    if not command.args:
+        await message.answer(
+            "╭───────────────────────────╮\n"
+            "│   ℹ️  USAGE GUIDE         │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "Export scan results as JSON.\n"
+            "\n"
+            "┌─ FORMAT ──────────────────\n"
+            "│\n"
+            "│  /url_json <link1> [link2]\n"
+            "│\n"
+            "│  Example:\n"
+            "│  /url_json example.com\n"
+            "│\n"
+            "└────────────────────────────"
+            + get_footer()
+        )
+        return
+
+    # Reuse validation from cmd_url_check
+    if not await async_is_user_registered(user_id):
+        await message.answer(
+            "╭───────────────────────────╮\n"
+            "│   ⚠️  ACCESS REQUIRED     │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "Use /register to get access."
+            + get_footer()
+        )
+        return
+
+    if not await async_check_subscription(user_id):
+        await message.answer(
+            "╭───────────────────────────╮\n"
+            "│   💳  SUBSCRIPTION NEEDED │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "Use /buy to see plans and prices."
+            + get_footer()
+        )
+        return
+
+    if not await rate_limiter.is_allowed(user_id):
+        wait_time = rate_limiter.get_wait_time(user_id)
+        await message.answer(
+            f"⏱️ Rate limit exceeded. Wait {wait_time} seconds."
+            + get_footer()
+        )
+        return
+
+    # Parse and validate URLs
+    from security import sanitize_url
+    raw_urls = [u.strip() for u in command.args.split() if u.strip()]
+    urls = []
+    for raw in raw_urls:
+        normalized = normalize_url(raw)
+        sanitized, is_safe = sanitize_url(normalized)
+        if is_safe:
+            urls.append(sanitized)
+
+    urls = urls[:Config.MAX_URLS_PER_REQUEST]
+
+    if not urls:
+        await message.answer("❌ No valid URLs provided." + get_footer())
+        return
+
+    status_msg = await message.answer("🔄 Scanning URLs for JSON export...")
+
+    try:
+        import json
+        from aiogram.types import BufferedInputFile
+
+        results = []
+        session = await get_http_session()
+
+        for url in urls:
+            try:
+                gateways, status_code, captcha, cloudflare, \
+                    security_type, cvv_status, inbuilt_status, \
+                    ecommerce_platform, cart_abandonment, \
+                    gateway_matches = await check_url(url, session)
+
+                result = {
+                    "url": url,
+                    "status_code": status_code,
+                    "timestamp": datetime.now().isoformat(),
+                    "gateways": {
+                        name: {
+                            "confidence": round(match.confidence, 3),
+                            "category": match.category,
+                            "evidence": match.evidence[:80] if match.evidence else "",
+                        }
+                        for name, match in gateway_matches.items()
+                    } if gateway_matches else {g: {"confidence": None} for g in gateways},
+                    "security": {
+                        "3d_secure": "3d" in security_type.lower(),
+                        "otp": "otp" in security_type.lower(),
+                        "captcha": captcha,
+                        "cloudflare": cloudflare,
+                        "cvv_cvc_required": "required" in cvv_status.lower() if cvv_status else False,
+                        "inbuilt_payment": inbuilt_status.lower() in ("yes", "detected"),
+                    },
+                    "platform": {
+                        "ecommerce": ecommerce_platform,
+                        "cart_abandonment_tools": cart_abandonment,
+                    },
+                }
+                results.append(result)
+
+            except Exception as e:
+                logger.error(f"Error scanning {url}: {e}")
+                results.append({"url": url, "error": str(e)})
+
+        json_data = {
+            "scan_date": datetime.now().isoformat(),
+            "total_urls": len(urls),
+            "results": results,
+        }
+
+        json_str = json.dumps(json_data, indent=2, ensure_ascii=False)
+
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+        if len(json_str) <= 4000:
+            await message.answer(f"```json\n{json_str}\n```", parse_mode=ParseMode.MARKDOWN)
+        else:
+            filename = f"gateway_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            file = BufferedInputFile(json_str.encode("utf-8"), filename=filename)
+            await message.answer_document(
+                file,
+                caption=f"📊 Gateway scan results ({len(urls)} URLs)"
+            )
+
+        # Store URLs for rescan
+        await state.update_data(last_urls=urls)
+
+    except Exception as e:
+        logger.error(f"Error in cmd_url_json: {e}")
+        await message.answer("❌ Error processing request." + get_footer())
+
+
+@router.message(Command("url_csv"))
+async def cmd_url_csv(message: Message, command: CommandObject, state: FSMContext):
+    """
+    Export URL scan results as CSV.
+
+    Usage:
+        /url_csv https://stripe.com https://paypal.com
+
+    Returns:
+        CSV with one row per gateway detected, including confidence scores
+    """
+    user_id = message.from_user.id
+
+    if not command.args:
+        await message.answer(
+            "╭───────────────────────────╮\n"
+            "│   ℹ️  USAGE GUIDE         │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "Export scan results as CSV.\n"
+            "\n"
+            "┌─ FORMAT ──────────────────\n"
+            "│\n"
+            "│  /url_csv <link1> [link2]\n"
+            "│\n"
+            "│  Example:\n"
+            "│  /url_csv example.com\n"
+            "│\n"
+            "└────────────────────────────"
+            + get_footer()
+        )
+        return
+
+    if not await async_is_user_registered(user_id):
+        await message.answer(
+            "╭───────────────────────────╮\n"
+            "│   ⚠️  ACCESS REQUIRED     │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "Use /register to get access."
+            + get_footer()
+        )
+        return
+
+    if not await async_check_subscription(user_id):
+        await message.answer(
+            "╭───────────────────────────╮\n"
+            "│   💳  SUBSCRIPTION NEEDED │\n"
+            "╰───────────────────────────╯\n"
+            "\n"
+            "Use /buy to see plans and prices."
+            + get_footer()
+        )
+        return
+
+    if not await rate_limiter.is_allowed(user_id):
+        wait_time = rate_limiter.get_wait_time(user_id)
+        await message.answer(
+            f"⏱️ Rate limit exceeded. Wait {wait_time} seconds."
+            + get_footer()
+        )
+        return
+
+    from security import sanitize_url
+    raw_urls = [u.strip() for u in command.args.split() if u.strip()]
+    urls = []
+    for raw in raw_urls:
+        normalized = normalize_url(raw)
+        sanitized, is_safe = sanitize_url(normalized)
+        if is_safe:
+            urls.append(sanitized)
+
+    urls = urls[:Config.MAX_URLS_PER_REQUEST]
+
+    if not urls:
+        await message.answer("❌ No valid URLs provided." + get_footer())
+        return
+
+    status_msg = await message.answer("🔄 Scanning URLs for CSV export...")
+
+    try:
+        import csv
+        import io
+        from aiogram.types import BufferedInputFile
+
+        csv_buffer = io.StringIO()
+        writer = csv.writer(csv_buffer)
+
+        writer.writerow([
+            "URL", "Gateway", "Confidence", "Category",
+            "Status Code", "Platform", "3D Secure", "OTP",
+            "Captcha", "Cloudflare", "CVV/CVC Required",
+        ])
+
+        session = await get_http_session()
+
+        for url in urls:
+            try:
+                gateways, status_code, captcha, cloudflare, \
+                    security_type, cvv_status, inbuilt_status, \
+                    ecommerce_platform, cart_abandonment, \
+                    gateway_matches = await check_url(url, session)
+
+                if gateway_matches:
+                    for name, match in sorted(gateway_matches.items(), key=lambda x: -x[1].confidence):
+                        writer.writerow([
+                            url, name, f"{match.confidence:.1%}", match.category,
+                            status_code, ecommerce_platform,
+                            "Yes" if "3d" in security_type.lower() else "No",
+                            "Yes" if "otp" in security_type.lower() else "No",
+                            "Yes" if captcha else "No",
+                            "Yes" if cloudflare else "No",
+                            "Yes" if "required" in cvv_status.lower() else "No",
+                        ])
+                elif gateways:
+                    for gw in gateways:
+                        writer.writerow([
+                            url, gw, "N/A", "N/A",
+                            status_code, ecommerce_platform,
+                            "Yes" if "3d" in security_type.lower() else "No",
+                            "Yes" if "otp" in security_type.lower() else "No",
+                            "Yes" if captcha else "No",
+                            "Yes" if cloudflare else "No",
+                            "Yes" if "required" in cvv_status.lower() else "No",
+                        ])
+                else:
+                    writer.writerow([
+                        url, "None", "N/A", "N/A",
+                        status_code, ecommerce_platform,
+                        "No", "No", "No", "No", "No",
+                    ])
+
+            except Exception as e:
+                logger.error(f"Error scanning {url}: {e}")
+
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+        filename = f"gateway_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        file = BufferedInputFile(csv_buffer.getvalue().encode("utf-8"), filename=filename)
+        await message.answer_document(
+            file,
+            caption=f"📊 Gateway scan results ({len(urls)} URLs)"
+        )
+
+        await state.update_data(last_urls=urls)
+
+    except Exception as e:
+        logger.error(f"Error in cmd_url_csv: {e}")
+        await message.answer("❌ Error processing request." + get_footer())
+
+
+# =============================================================================
 # URL PROCESSING HANDLER
 # =============================================================================
 
@@ -2632,9 +3197,16 @@ async def cmd_url_check(message: Message, command: CommandObject, state: FSMCont
             # result typically ends with newlines, so strip one set of newlines if needed
             msg_text = result.rstrip() + footer
             
-            # Add Quick Rescan button for each result
+            # P1-2: Enhanced inline buttons — rescan, details, export
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔄 Quick Rescan", callback_data=f"quick_rescan_{i}")]
+                [
+                    InlineKeyboardButton(text="🔄 Rescan", callback_data=f"quick_rescan_{i}"),
+                    InlineKeyboardButton(text="📊 Details", callback_data=f"scan_details_{i}"),
+                ],
+                [
+                    InlineKeyboardButton(text="📥 JSON", callback_data=f"scan_json_{i}"),
+                    InlineKeyboardButton(text="📤 CSV", callback_data=f"scan_csv_{i}"),
+                ],
             ])
             
             await message.answer(msg_text, reply_markup=keyboard)
@@ -2662,11 +3234,27 @@ async def process_urls_async(
     # Get the shared HTTP session from the persistent client
     session = await get_http_session()
 
+    async def wrapped_check(url: str, session) -> tuple:
+        import time
+        from cache_manager import get_cached_result
+        try:
+            cache_hit = await get_cached_result(url) is not None
+        except Exception:
+            cache_hit = False
+        start = time.perf_counter()
+        try:
+            res = await check_url(url, session)
+            duration_ms = (time.perf_counter() - start) * 1000
+            return res, duration_ms, cache_hit
+        except Exception as e:
+            duration_ms = (time.perf_counter() - start) * 1000
+            return e, duration_ms, False
+
     # Create tasks for all URLs
     tasks = []
     for url in urls:
         logger.info(f"User {user_id} checking URL {len(tasks) + 1}/{total}: {url}")
-        tasks.append(check_url(url, session))
+        tasks.append(wrapped_check(url, session))
 
     # Execute all checks concurrently with progress updates
     if progress_message and total > 2:
@@ -2715,43 +3303,29 @@ async def process_urls_async(
         try:
             if isinstance(response, Exception):
                 logger.error(f"Error processing URL {url}: {str(response)}")
-                error_display = str(response)[:50] + "..." if len(str(response)) > 50 else str(response)
-                display_url = url[:47] + "..." if len(url) > 50 else url
-                results.append(
-                    "╭─ SCAN RESULT ─────────────╮\n"
-                    f"│  🌐 {display_url}\n"
-                    "│  🔴 ERROR\n"
-                    "╰───────────────────────────╯\n"
-                    "\n"
-                    "┌─ ❌ ERROR DETAILS ─────────\n"
-                    "│\n"
-                    f"│  {error_display}\n"
-                    "│\n"
-                    "└────────────────────────────\n\n"
-                )
-            else:
-                detected_gateways, status_code, captcha, cloudflare, payment_security_type, cvv_cvc_status, inbuilt_status, ecommerce_platform, cart_abandonment = response
-                result_line = format_url_result(
-                    url, detected_gateways, status_code, captcha,
-                    cloudflare, payment_security_type, cvv_cvc_status, inbuilt_status, ecommerce_platform, cart_abandonment
-                )
+                result_line = format_error_result(url, 0, str(response))
                 results.append(result_line)
+            else:
+                res_val, duration_ms, cache_hit = response
+                if isinstance(res_val, Exception):
+                    logger.error(f"Error processing URL {url}: {str(res_val)}")
+                    result_line = format_error_result(url, 0, str(res_val))
+                    results.append(result_line)
+                else:
+                    detected_gateways, status_code, captcha, cloudflare, payment_security_type, cvv_cvc_status, inbuilt_status, ecommerce_platform, cart_abandonment, gateway_matches = res_val
+                    result_line = format_url_result(
+                        url, detected_gateways, status_code, captcha,
+                        cloudflare, payment_security_type, cvv_cvc_status, inbuilt_status,
+                        ecommerce_platform, cart_abandonment,
+                        gateway_matches=gateway_matches,
+                        scan_duration_ms=duration_ms,
+                        cache_hit=cache_hit,
+                    )
+                    results.append(result_line)
         except Exception as e:
             logger.error(f"Error formatting result for {url}: {str(e)}")
-            error_display = str(e)[:50] + "..." if len(str(e)) > 50 else str(e)
-            display_url = url[:24] + "..." if len(url) > 27 else url
-            results.append(
-                "╭─ SCAN RESULT ─────────────╮\n"
-                f"│  🌐 {display_url}\n"
-                "│  🔴 ERROR\n"
-                "╰───────────────────────────╯\n"
-                "\n"
-                "┌─ ❌ ERROR DETAILS ─────────\n"
-                "│\n"
-                f"│  {error_display}\n"
-                "│\n"
-                "└────────────────────────────\n\n"
-            )
+            result_line = format_error_result(url, 0, str(e))
+            results.append(result_line)
 
     return results
 
@@ -2788,7 +3362,7 @@ def _result_to_record(url: str, response) -> dict:
     try:
         (detected_gateways, status_code, captcha, cloudflare,
          payment_security_type, cvv_cvc_status, inbuilt_status,
-         ecommerce_platform, cart_abandonment) = response
+         ecommerce_platform, cart_abandonment, gateway_matches) = response
         inbuilt_lower = str(inbuilt_status).lower()
         record.update({
             "status_code": status_code,
@@ -2801,6 +3375,16 @@ def _result_to_record(url: str, response) -> dict:
             "ecommerce_platform": ecommerce_platform,
             "cart_abandonment": cart_abandonment,
         })
+        # Add confidence data for structured exports
+        if gateway_matches:
+            record["gateway_confidence"] = {
+                name: {
+                    "confidence": m.confidence,
+                    "category": m.category,
+                    "evidence": m.evidence[:60] if m.evidence else "",
+                }
+                for name, m in gateway_matches.items()
+            }
     except Exception as e:  # malformed response shape — record as an error row
         record["security_type"] = f"ERROR: {str(e)[:80]}"
 
@@ -3276,9 +3860,12 @@ async def cmd_bulk_check(message: Message, state: FSMContext):
             f"User {user_id} initiated bulk scan of {len(urls)} URLs "
             f"from file: {document.file_name}"
         )
+        import time
+        start_time = time.perf_counter()
         written, gateways_found, errors = await _run_bulk_scan(
             urls, user_id, output_path, status_msg
         )
+        scan_duration_ms = (time.perf_counter() - start_time) * 1000
 
         # Remember where this user's results live + recent URLs for rescans.
         await state.update_data(
@@ -3288,24 +3875,25 @@ async def cmd_bulk_check(message: Message, state: FSMContext):
             last_urls=urls,
         )
 
+        # Get records to calculate gateway frequencies
+        records = _read_bulk_records(output_path)
+        gateway_counts = {}
+        for r in records:
+            for gw in r.get("gateways", []):
+                gateway_counts[gw] = gateway_counts.get(gw, 0) + 1
+
+        successful = written - errors
+        summary_text = format_bulk_summary(
+            total_urls=written,
+            successful=successful,
+            failed=errors,
+            gateway_counts=gateway_counts,
+            scan_duration_ms=scan_duration_ms,
+        )
+
         # Ask the user to pick an output format.
         await status_msg.edit_text(
-            "╭───────────────────────────╮\n"
-            "│   ✅  BULK SCAN COMPLETE  │\n"
-            "╰───────────────────────────╯\n"
-            "\n"
-            f"📄 {document.file_name[:24]}\n"
-            "\n"
-            "┌─ SUMMARY ─────────────────\n"
-            "│\n"
-            f"│  ✓  Scanned   : {written}\n"
-            f"│  💳 Gateways  : {gateways_found}\n"
-            f"│  ⚠️  Errors    : {errors}\n"
-            "│\n"
-            "└────────────────────────────\n"
-            "\n"
-            "Choose your output format 👇"
-            + get_footer(),
+            summary_text + "\n\nChoose your output format 👇",
             reply_markup=_bulk_format_keyboard(),
         )
 

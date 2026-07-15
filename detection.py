@@ -1191,7 +1191,7 @@ def is_cloudflare_protected(headers: dict, html: str = None) -> bool:
 def analyze_url_response(
     html: str,
     headers: Dict[str, str],
-    status_code: int
+    status_code: int = 200
 ) -> Dict[str, Any]:
     """
     Perform comprehensive analysis of a URL response.
